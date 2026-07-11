@@ -9,12 +9,16 @@ USAGE:
   btrctl <command> [options]
 
 COMMANDS:
-  mount
+  mount [--host HOST]
       Mount $BTRFS_MOUNT_POINT. Says so and exits if already mounted.
 
-  umount
-  unmount
+        --host HOST         Run against HOST instead of the local machine
+
+  umount [--host HOST]
+  unmount [--host HOST]
       Unmount $BTRFS_MOUNT_POINT. Says so and exits if already unmounted.
+
+        --host HOST         Run against HOST instead of the local machine
 
   snapshot [--tag NAME] [--host HOST]
       Take a snapshot set of all configured subvolumes under $BTRFS_MOUNT_POINT.
@@ -24,21 +28,18 @@ COMMANDS:
 
         --tag NAME          Attach a human-readable tag to this snapshot set
         --host HOST         Run against HOST instead of the local machine
-                              (via SSH; prompts once for HOST's sudo password)
 
   list [--host HOST]
       List local snapshot sets: timestamp, tag if present, and FLAGS
       ("latest" and/or any trunk_<id> this set was last backed up to).
 
         --host HOST         Run against HOST instead of the local machine
-                              (via SSH; prompts once for HOST's sudo password)
 
   latest [--host HOST]
       Print just the timestamp ID of the latest local snapshot set, and
       nothing else -- suitable for capturing in scripts.
 
         --host HOST         Run against HOST instead of the local machine
-                              (via SSH; prompts once for HOST's sudo password)
 
   rm SET_NAME [--host HOST]
       Remove a local snapshot set by timestamp name. Prompts for
