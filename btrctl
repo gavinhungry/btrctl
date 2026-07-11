@@ -170,6 +170,15 @@ _require_ssh_user() {
     _die "SSH_USER is not set and \$SUDO_USER is not available; set SSH_USER in config or invoke via sudo"
 }
 
+_remote_sudo_prompt() {
+  local host="$1" m='' r=''
+  if [ -z "${NO_COLOR:-}" ]; then
+    m=$'\033[1;95m'
+    r=$'\033[0m'
+  fi
+  printf '%s[remote sudo]%s password for %s: ' "$m" "$r" "$host"
+}
+
 _ssh() {
   local host="$1"; shift
   _require_ssh_user
@@ -184,9 +193,8 @@ _ssh_tty() {
 
 _dispatch_remote() {
   local host="$1" subcmd="$2"; shift 2
-  _info "prompting for remote password for ${host}"
   local cmd arg
-  cmd="sudo btrctl --remote-label $(printf '%q' "$host") ${subcmd}"
+  cmd="sudo -p $(printf '%q' "$(_remote_sudo_prompt "$host")") btrctl --remote-label $(printf '%q' "$host") ${subcmd}"
   for arg in "$@"; do
     cmd+=" $(printf '%q' "$arg")"
   done
@@ -635,7 +643,7 @@ _trunk_backup() {
     snapshots_dir="${REMOTE_BTRFS_MOUNT_POINT}/@snapshots"
     subvols=("${REMOTE_SUBVOLUMES[@]}")
 
-    read -rs -p "[remote sudo] password for ${host}: " SRC_PW
+    read -rs -p "$(_remote_sudo_prompt "$host")" SRC_PW
     echo >&2
 
     _src_run "mountpoint -q '${REMOTE_BTRFS_MOUNT_POINT}' || mount '${REMOTE_BTRFS_MOUNT_POINT}'" || \
