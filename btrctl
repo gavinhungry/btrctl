@@ -196,7 +196,7 @@ _dispatch_remote() {
 _remote_root() {
   local host="$1" pw="$2"
   shift 2
-  printf '%s\n' "$pw" | _ssh "$host" "sudo -S $*"
+  printf '%s\n' "$pw" | _ssh "$host" "sudo -S -p '' sh -c $(printf '%q' "$*")"
 }
 
 _remote_config() {
@@ -616,7 +616,7 @@ _src_run() {
 
 _src_send_receive() {
   if [ -n "${SRC_HOST:-}" ]; then
-    printf '%s\n' "$SRC_PW" | _ssh "$SRC_HOST" "sudo -S $1 2>/dev/null" | btrfs receive "$2"
+    printf '%s\n' "$SRC_PW" | _ssh "$SRC_HOST" "sudo -S -p '' $1 2>/dev/null" | btrfs receive "$2"
   else
     eval "$1" | btrfs receive "$2"
   fi
@@ -635,8 +635,7 @@ _trunk_backup() {
     snapshots_dir="${REMOTE_BTRFS_MOUNT_POINT}/@snapshots"
     subvols=("${REMOTE_SUBVOLUMES[@]}")
 
-    _info "prompting for remote password for ${host}:"
-    read -rs SRC_PW
+    read -rs -p "[remote sudo] password for ${host}: " SRC_PW
     echo >&2
 
     _src_run "mountpoint -q '${REMOTE_BTRFS_MOUNT_POINT}' || mount '${REMOTE_BTRFS_MOUNT_POINT}'" || \
