@@ -239,6 +239,25 @@ _remote_config() {
 }
 
 cmd_mount() {
+  local host=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --host)
+        [ $# -ge 2 ] || _die "--host requires an argument"
+        host="$2"
+        shift 2
+        ;;
+      *)
+        _die "mount: unknown argument: $1"
+        ;;
+    esac
+  done
+
+  if [ -n "$host" ]; then
+    _dispatch_remote "$host" mount
+    return
+  fi
+
   _require_root
   if mountpoint -q "$BTRFS_MOUNT_POINT"; then
     _info "${BTRFS_MOUNT_POINT} is already mounted"
@@ -249,6 +268,25 @@ cmd_mount() {
 }
 
 cmd_umount() {
+  local host=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --host)
+        [ $# -ge 2 ] || _die "--host requires an argument"
+        host="$2"
+        shift 2
+        ;;
+      *)
+        _die "umount: unknown argument: $1"
+        ;;
+    esac
+  done
+
+  if [ -n "$host" ]; then
+    _dispatch_remote "$host" umount
+    return
+  fi
+
   _require_root
   if ! mountpoint -q "$BTRFS_MOUNT_POINT"; then
     _info "${BTRFS_MOUNT_POINT} is already unmounted"
@@ -827,12 +865,16 @@ ${c_bold}USAGE:${c_reset}
   ${c_bold}btrctl${c_reset} <command> [options]
 
 ${c_bold}COMMANDS:${c_reset}
-  ${c_bold}mount${c_reset}
+  ${c_bold}mount${c_reset} [--host ${c_var}HOST${c_reset}]
       Mount \$BTRFS_MOUNT_POINT. Says so and exits if already mounted.
 
-  ${c_bold}umount${c_reset}
-  ${c_bold}unmount${c_reset}
+        --host ${c_var}HOST${c_reset}         Run against HOST instead of the local machine
+
+  ${c_bold}umount${c_reset} [--host ${c_var}HOST${c_reset}]
+  ${c_bold}unmount${c_reset} [--host ${c_var}HOST${c_reset}]
       Unmount \$BTRFS_MOUNT_POINT. Says so and exits if already unmounted.
+
+        --host ${c_var}HOST${c_reset}         Run against HOST instead of the local machine
 
   ${c_bold}snapshot${c_reset} [--tag ${c_var}NAME${c_reset}] [--host ${c_var}HOST${c_reset}]
       Take a snapshot set of all configured subvolumes under \$BTRFS_MOUNT_POINT.
@@ -842,21 +884,18 @@ ${c_bold}COMMANDS:${c_reset}
 
         --tag ${c_var}NAME${c_reset}          Attach a human-readable tag to this snapshot set
         --host ${c_var}HOST${c_reset}         Run against HOST instead of the local machine
-                              (via SSH; prompts once for HOST's sudo password)
 
   ${c_bold}list${c_reset} [--host ${c_var}HOST${c_reset}]
       List local snapshot sets: timestamp, tag if present, and FLAGS
       ("latest" and/or any trunk_<id> this set was last backed up to).
 
         --host ${c_var}HOST${c_reset}         Run against HOST instead of the local machine
-                              (via SSH; prompts once for HOST's sudo password)
 
   ${c_bold}latest${c_reset} [--host ${c_var}HOST${c_reset}]
       Print just the timestamp ID of the latest local snapshot set, and
       nothing else -- suitable for capturing in scripts.
 
         --host ${c_var}HOST${c_reset}         Run against HOST instead of the local machine
-                              (via SSH; prompts once for HOST's sudo password)
 
   ${c_bold}rm${c_reset} ${c_var}SET_NAME${c_reset} [--host ${c_var}HOST${c_reset}]
       Remove a local snapshot set by timestamp name. Prompts for
