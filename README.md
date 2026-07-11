@@ -1,0 +1,95 @@
+# btrctl
+
+Btrfs snapshot and trunk backup tool.
+
+```
+btrctl - Btrfs snapshot and trunk backup tool
+
+USAGE:
+  btrctl <command> [options]
+
+COMMANDS:
+  mount
+      Mount $BTRFS_MOUNT_POINT. Says so and exits if already mounted.
+
+  umount
+  unmount
+      Unmount $BTRFS_MOUNT_POINT. Says so and exits if already unmounted.
+
+  snapshot [--tag NAME] [--host HOST]
+      Take a snapshot set of all configured subvolumes under $BTRFS_MOUNT_POINT.
+      Mounts $BTRFS_MOUNT_POINT automatically if not already mounted.
+      Records immutable-flagged files/dirs for each snapshot (lost on
+      send/receive otherwise).
+
+        --tag NAME          Attach a human-readable tag to this snapshot set
+        --host HOST         Run against HOST instead of the local machine
+                              (via SSH; prompts once for HOST's sudo password)
+
+  list [--host HOST]
+      List local snapshot sets: timestamp, tag if present, and FLAGS
+      ("latest" and/or any trunk_<id> this set was last backed up to).
+
+        --host HOST         Run against HOST instead of the local machine
+                              (via SSH; prompts once for HOST's sudo password)
+
+  latest [--host HOST]
+      Print just the timestamp ID of the latest local snapshot set, and
+      nothing else -- suitable for capturing in scripts.
+
+        --host HOST         Run against HOST instead of the local machine
+                              (via SSH; prompts once for HOST's sudo password)
+
+  rm SET_NAME [--host HOST]
+      Remove a local snapshot set by timestamp name. Prompts for
+      confirmation before deleting.
+
+        --host HOST         Run against HOST instead of the local machine
+
+  tag SET_ID TAG_NAME [--host HOST]
+      Set or update the tag on an existing local snapshot set. An empty
+      TAG_NAME clears the tag.
+
+        --host HOST         Run against HOST instead of the local machine
+
+  trunk mount
+      Unlock (LUKS) and mount the trunk backup device at $TRUNK_MOUNT_POINT.
+      Each step is skipped (with a message) if already done.
+
+  trunk umount
+  trunk unmount
+      Unmount $TRUNK_MOUNT_POINT and close the LUKS device. The unmount
+      step is skipped (with a message) if already unmounted, but the LUKS
+      device is always closed regardless.
+
+  trunk id
+      Print the currently mounted trunk device's short identifier (the
+      $TRUNK_MOUNT_POINT/.id marker file content used in trunk_<id>
+      tracking symlinks), e.g. "a".
+
+  trunk backup [--host HOST]
+      Back up the latest snapshot set to the currently mounted trunk device.
+      Always runs on the machine trunk is physically attached to.
+      If /trunk/@<HOST_LABEL> does not exist, it is created automatically
+      as a new subvolume. If it exists but is not a btrfs subvolume,
+      aborts with an error.
+
+        --host HOST         Back up HOST's latest snapshot set instead of
+                              the local machine's
+
+  trunk list [HOST]
+      List snapshot sets stored on trunk for a given host (default: local
+      machine's HOST_LABEL). HOST is a HOST_LABEL, not an SSH alias, and
+      no SSH connection is ever made (same as trunk rm's HOST).
+
+  trunk rm HOST/SET_NAME
+      Remove a snapshot set from trunk. HOST is required and explicit;
+      there is no implicit "local machine" default for this destructive
+      operation. Prompts for confirmation before deleting.
+
+  config
+      Print effective configuration as KEY=value pairs.
+
+  help, -h, --help
+      Show this help text.
+```

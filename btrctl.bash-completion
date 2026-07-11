@@ -1,0 +1,21 @@
+_btrctl() {
+  local cur
+  cur="${COMP_WORDS[COMP_CWORD]}"
+
+  local commands="mount umount unmount snapshot list latest rm tag trunk config help version -h --help -v --version"
+  local trunk_commands="mount umount unmount id backup list rm"
+
+  COMPREPLY=()
+
+  if [ "$COMP_CWORD" -eq 1 ]; then
+    COMPREPLY=($(compgen -W "$commands" -- "$cur"))
+    return
+  fi
+
+  if [ "${COMP_WORDS[1]}" = "trunk" ] && [ "$COMP_CWORD" -eq 2 ]; then
+    COMPREPLY=($(compgen -W "$trunk_commands" -- "$cur"))
+    return
+  fi
+}
+
+complete -F _btrctl btrctl

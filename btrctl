@@ -1,0 +1,945 @@
+#!/bin/bash
+
+set -euo pipefail
+shopt -s nullglob
+
+ORIG_ARGV=("$@")
+REMOTE_LABEL=""
+
+readonly CONF_FILE=/etc/btrctl.conf
+readonly TRUNK_LUKS_MAPPER_NAME=trunk
+
+HOST_LABEL=$(hostname)
+BTRFS_MOUNT_POINT=/btrfs
+SUBVOLUMES=(@)
+TRUNK_LUKS_UUID=
+TRUNK_LUKS_KEYFILE=/etc/luks/trunk.key
+TRUNK_DISCARDS=1
+TRUNK_MOUNT_POINT=/trunk
+SSH_USER=${SUDO_USER:-$USER}
+
+if [ -f "$CONF_FILE" ]; then
+  source "$CONF_FILE"
+fi
+
+OUT_RESET=''
+OUT_BOLD=''
+ERR_RESET=''
+ERR_RED=''
+ERR_YELLOW=''
+ERR_BLUE=''
+ERR_WHITE=''
+
+if [ -z "${NO_COLOR:-}" ]; then
+  if [ -t 1 ]; then
+    OUT_RESET=$'\033[0m'
+    OUT_BOLD=$'\033[1m'
+  fi
+
+  if [ -t 2 ]; then
+    ERR_RESET=$'\033[0m'
+    ERR_RED=$'\033[1;31m'
+    ERR_YELLOW=$'\033[1;33m'
+    ERR_BLUE=$'\033[1;34m'
+    ERR_WHITE=$'\033[1;37m'
+  fi
+fi
+
+_log() {
+  local color="$1" level="$2"; shift 2
+  local label=""
+  [ -n "$REMOTE_LABEL" ] && label="${ERR_WHITE}[${REMOTE_LABEL}]${ERR_RESET} "
+  echo "${color}[${level}]${ERR_RESET} ${label}$*" >&2
+}
+
+_die() {
+  _log "$ERR_RED" ERROR "$@"
+  exit 1
+}
+
+_error() {
+  _log "$ERR_RED" ERROR "$@"
+}
+
+_warn() {
+  _log "$ERR_YELLOW" WARN "$@"
+}
+
+_info() {
+  _log "$ERR_BLUE" INFO "$@"
+}
+
+_require_root() {
+  [ "$(id -u)" -eq 0 ] && return
+  command -v sudo > /dev/null 2>&1 || \
+    _die "this command must be run as root"
+  exec sudo -- "$0" "${ORIG_ARGV[@]}"
+}
+
+_confirm() {
+  local prompt="$1" answer
+  read -r -p "${prompt} [y/N] " answer || answer=""
+  case "$answer" in
+    y|Y) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+_update_symlink() {
+  local target="$1" link_path="$2"
+  if [ -e "$link_path" ] && [ ! -L "$link_path" ]; then
+    _warn "${link_path} exists and is not a symlink"
+    return 1
+  fi
+  ln -sfn "$target" "$link_path"
+}
+
+_mount_point() {
+  _info "Mounting ${1} ..."
+  mount "$1"
+}
+
+_umount_point() {
+  _info "Unmounting ${1} ..."
+  umount "$1"
+}
+
+_ensure_btrfs_mounted() {
+  _require_root
+  mountpoint -q "$BTRFS_MOUNT_POINT" || _mount_point "$BTRFS_MOUNT_POINT"
+}
+
+_ensure_trunk_mounted() {
+  _require_root
+  mountpoint -q "$TRUNK_MOUNT_POINT" || \
+    _die "${TRUNK_MOUNT_POINT} is not mounted; run 'btrctl trunk mount' first"
+}
+
+_require_trunk_uuid() {
+  [ -n "$TRUNK_LUKS_UUID" ] || \
+    _die "TRUNK_LUKS_UUID is not set in ${CONF_FILE}; required for trunk commands"
+}
+
+_snapshot_subvol_path() {
+  local set_dir="$1" timestamp="$2" label="$3" subvol="$4"
+  echo "${set_dir}/@snapshot-${timestamp}-${label}-${subvol}"
+}
+
+_is_set_name() {
+  case "$1" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+_read_tag() {
+  [ -f "${1}/tag" ] && cat "${1}/tag" || true
+}
+
+_next_most_recent_set() {
+  local dir="$1" d name
+  local names=()
+  for d in "$dir"/*/; do
+    name=$(basename "$d")
+    _is_set_name "$name" && names+=("$name")
+  done
+  if [ "${#names[@]}" -gt 0 ]; then
+    printf '%s\n' "${names[@]}" | sort | tail -n1
+  fi
+}
+
+_delete_set_dir() {
+  local set_dir="$1" subvol_path
+  _info "This will permanently delete: ${set_dir}"
+  _confirm "Proceed?" || { _info "Aborted."; return 1; }
+  for subvol_path in "$set_dir"/@snapshot-*; do
+    btrfs subvolume delete "$subvol_path"
+  done
+  rm -rf "$set_dir"
+}
+
+_immutables() {
+  { find "${@:-.}" -exec lsattr {} + 2>/dev/null || true; } \
+    | { grep '^[^ ]*i' || true; } \
+    | cut -d' ' -f2- \
+    | sort -u
+}
+
+_require_ssh_user() {
+  [ -n "$SSH_USER" ] || \
+    _die "SSH_USER is not set and \$SUDO_USER is not available; set SSH_USER in config or invoke via sudo"
+}
+
+_ssh() {
+  local host="$1"; shift
+  _require_ssh_user
+  sudo -H -u "$SSH_USER" ssh -l "$SSH_USER" "$host" "$@"
+}
+
+_ssh_tty() {
+  local host="$1"; shift
+  _require_ssh_user
+  sudo -H -u "$SSH_USER" ssh -t -l "$SSH_USER" "$host" "$@"
+}
+
+_dispatch_remote() {
+  local host="$1" subcmd="$2"; shift 2
+  _info "prompting for remote password for ${host}"
+  local cmd arg
+  cmd="sudo btrctl --remote-label $(printf '%q' "$host") ${subcmd}"
+  for arg in "$@"; do
+    cmd+=" $(printf '%q' "$arg")"
+  done
+  _ssh_tty "$host" "$cmd"
+}
+
+_remote_root() {
+  local host="$1" pw="$2"
+  shift 2
+  printf '%s\n' "$pw" | _ssh "$host" "sudo -S $*"
+}
+
+_remote_config() {
+  local host="$1" raw line
+  raw=$(_ssh "$host" "btrctl config") || \
+    _die "failed to fetch remote config from ${host}"
+
+  local subvolumes_line=""
+  REMOTE_HOST_LABEL=""
+  REMOTE_BTRFS_MOUNT_POINT=""
+  REMOTE_SUBVOLUMES=()
+
+  while IFS= read -r line; do
+    case "$line" in
+      HOST_LABEL=*)
+        REMOTE_HOST_LABEL="${line#HOST_LABEL=}"
+        ;;
+      BTRFS_MOUNT_POINT=*)
+        REMOTE_BTRFS_MOUNT_POINT="${line#BTRFS_MOUNT_POINT=}"
+        ;;
+      SUBVOLUMES=*)
+        subvolumes_line="${line#SUBVOLUMES=}"
+        ;;
+    esac
+  done <<< "$raw"
+
+  [ -n "$subvolumes_line" ] && eval "REMOTE_SUBVOLUMES=${subvolumes_line}"
+
+  [ -n "$REMOTE_HOST_LABEL" ] || _die "could not determine HOST_LABEL from ${host}"
+  [ -n "$REMOTE_BTRFS_MOUNT_POINT" ] || _die "could not determine BTRFS_MOUNT_POINT from ${host}"
+  [ "${#REMOTE_SUBVOLUMES[@]}" -gt 0 ] || _die "could not determine SUBVOLUMES from ${host}"
+}
+
+cmd_mount() {
+  _require_root
+  if mountpoint -q "$BTRFS_MOUNT_POINT"; then
+    _info "${BTRFS_MOUNT_POINT} is already mounted"
+    return
+  fi
+  _mount_point "$BTRFS_MOUNT_POINT"
+  _info "Mounted ${BTRFS_MOUNT_POINT}"
+}
+
+cmd_umount() {
+  _require_root
+  if ! mountpoint -q "$BTRFS_MOUNT_POINT"; then
+    _info "${BTRFS_MOUNT_POINT} is already unmounted"
+    return
+  fi
+  _umount_point "$BTRFS_MOUNT_POINT"
+  _info "Unmounted ${BTRFS_MOUNT_POINT}"
+}
+
+cmd_snapshot() {
+  local tag="" host=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --tag)
+        [ $# -ge 2 ] || _die "--tag requires an argument"
+        tag="$2"
+        shift 2
+        ;;
+      --host)
+        [ $# -ge 2 ] || _die "--host requires an argument"
+        host="$2"
+        shift 2
+        ;;
+      *)
+        _die "snapshot: unknown argument: $1"
+        ;;
+    esac
+  done
+
+  if [ -n "$host" ]; then
+    _dispatch_remote "$host" snapshot --tag "$tag"
+    return
+  fi
+
+  _ensure_btrfs_mounted
+
+  local snapshots_subvol="@snapshots"
+  local now
+  now=$(date +'%Y-%m-%d-%H%M%S')
+  local snapshot_dir="${BTRFS_MOUNT_POINT}/${snapshots_subvol}/${now}"
+
+  mkdir -p "$snapshot_dir"
+
+  local subvol snapshot_name
+  (
+    cd "$BTRFS_MOUNT_POINT"
+    for subvol in "${SUBVOLUMES[@]}"; do
+      snapshot_name="@snapshot-${now}-${HOST_LABEL}-${subvol}"
+      if ! btrfs subvolume snapshot -r "$subvol" "${snapshots_subvol}/${now}/${snapshot_name}"; then
+        _error "failed to snapshot subvolume '${subvol}'; partial snapshot set at ${snapshot_dir} requires clean up"
+        exit 1
+      fi
+    done
+  ) || exit 1
+
+  _info "Locating immutables ..."
+  (
+    cd "$snapshot_dir"
+    for subvol in "${SUBVOLUMES[@]}"; do
+      snapshot_name="@snapshot-${now}-${HOST_LABEL}-${subvol}"
+      _immutables "$snapshot_name"
+    done
+  ) > "${snapshot_dir}/immutables"
+
+  if [ -n "$tag" ]; then
+    printf '%s' "$tag" > "${snapshot_dir}/tag"
+  fi
+
+  _info "Setting latest -> ${now}"
+  _update_symlink "$now" "${BTRFS_MOUNT_POINT}/${snapshots_subvol}/latest" || true
+
+  _info "Created snapshot set: ${now}${tag:+ (tag: ${tag})}"
+}
+
+cmd_list() {
+  local host=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --host)
+        [ $# -ge 2 ] || _die "--host requires an argument"
+        host="$2"
+        shift 2
+        ;;
+      *)
+        _die "list: unknown argument: $1"
+        ;;
+    esac
+  done
+
+  if [ -n "$host" ]; then
+    _dispatch_remote "$host" list
+    return
+  fi
+
+  _ensure_btrfs_mounted
+
+  local snapshots_dir="${BTRFS_MOUNT_POINT}/@snapshots"
+  if [ ! -d "$snapshots_dir" ]; then
+    _info "No snapshots found."
+    return
+  fi
+
+  local latest_target=""
+  if [ -L "${snapshots_dir}/latest" ]; then
+    latest_target=$(basename "$(readlink -f "${snapshots_dir}/latest")")
+  fi
+
+  local -A trunk_indicators=()
+  local link link_name link_target
+  for link in "${snapshots_dir}"/trunk_*; do
+    [ -L "$link" ] || continue
+    link_name=$(basename "$link")
+    link_target=$(readlink -f "$link" 2>/dev/null || true)
+    [ -n "$link_target" ] && [ -d "$link_target" ] || continue
+    link_target=$(basename "$link_target")
+    if [ -n "${trunk_indicators[$link_target]:-}" ]; then
+      trunk_indicators[$link_target]="${trunk_indicators[$link_target]}, ${link_name}"
+    else
+      trunk_indicators[$link_target]="$link_name"
+    fi
+  done
+
+  printf '%s%-20s  %-15s  %s%s\n' "$OUT_BOLD" "SET" "TAG" "FLAGS" "$OUT_RESET"
+  local found=0 d set_name tag flags
+  for d in "$snapshots_dir"/*/; do
+    set_name=$(basename "$d")
+    _is_set_name "$set_name" || continue
+    tag=$(_read_tag "${d%/}")
+    flags="${trunk_indicators[$set_name]:-}"
+    if [ "$set_name" = "$latest_target" ]; then
+      if [ -n "$flags" ]; then
+        flags="latest, ${flags}"
+      else
+        flags="latest"
+      fi
+    fi
+    printf '%-20s  %-15s  %s\n' "$set_name" "$tag" "$flags"
+    found=1
+  done
+  [ "$found" -eq 1 ] || _info "No snapshot sets found."
+}
+
+cmd_latest() {
+  local host=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --host)
+        [ $# -ge 2 ] || _die "--host requires an argument"
+        host="$2"
+        shift 2
+        ;;
+      *)
+        _die "latest: unknown argument: $1"
+        ;;
+    esac
+  done
+
+  if [ -n "$host" ]; then
+    _dispatch_remote "$host" latest
+    return
+  fi
+
+  _ensure_btrfs_mounted
+
+  local snapshots_dir="${BTRFS_MOUNT_POINT}/@snapshots"
+  local latest_link="${snapshots_dir}/latest"
+  [ -L "$latest_link" ] || _die "no ${latest_link} symlink found"
+
+  basename "$(readlink -f "$latest_link")"
+}
+
+cmd_rm() {
+  local host="" set_name=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --host)
+        [ $# -ge 2 ] || _die "--host requires an argument"
+        host="$2"
+        shift 2
+        ;;
+      -*)
+        _die "rm: unknown option: $1"
+        ;;
+      *)
+        [ -z "$set_name" ] || _die "rm: unexpected extra argument: $1"
+        set_name="$1"
+        shift
+        ;;
+    esac
+  done
+  [ -n "$set_name" ] || _die "rm: SET_NAME is required"
+
+  if [ -n "$host" ]; then
+    _dispatch_remote "$host" rm "$set_name"
+    return
+  fi
+
+  _ensure_btrfs_mounted
+
+  local snapshots_dir="${BTRFS_MOUNT_POINT}/@snapshots"
+  local set_dir="${snapshots_dir}/${set_name}"
+  [ -d "$set_dir" ] || _die "no such snapshot set: ${set_dir}"
+
+  _delete_set_dir "$set_dir" || return 1
+
+  local latest_link="${snapshots_dir}/latest"
+  if [ -L "$latest_link" ] && [ "$(readlink "$latest_link")" = "$set_name" ]; then
+    local next
+    next=$(_next_most_recent_set "$snapshots_dir")
+    if [ -n "$next" ]; then
+      _info "Setting latest -> ${next}"
+      _update_symlink "$next" "$latest_link" || true
+    else
+      rm -f "$latest_link"
+    fi
+  fi
+
+  _info "Removed snapshot set: ${set_name}"
+}
+
+cmd_tag() {
+  local host="" set_name="" tag_value="" got_set=0 got_tag=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --host)
+        [ $# -ge 2 ] || _die "--host requires an argument"
+        host="$2"
+        shift 2
+        ;;
+      -*)
+        _die "tag: unknown option: $1"
+        ;;
+      *)
+        if [ "$got_set" -eq 0 ]; then
+          set_name="$1"
+          got_set=1
+        elif [ "$got_tag" -eq 0 ]; then
+          tag_value="$1"
+          got_tag=1
+        else
+          _die "tag: unexpected extra argument: $1"
+        fi
+        shift
+        ;;
+    esac
+  done
+  [ "$got_set" -eq 1 ] || _die "tag: usage: tag SET_ID TAG_NAME"
+  [ "$got_tag" -eq 1 ] || _die "tag: usage: tag SET_ID TAG_NAME (empty string clears the tag)"
+
+  if [ -n "$host" ]; then
+    _dispatch_remote "$host" tag "$set_name" "$tag_value"
+    return
+  fi
+
+  _ensure_btrfs_mounted
+
+  local snapshots_dir="${BTRFS_MOUNT_POINT}/@snapshots"
+  local set_dir="${snapshots_dir}/${set_name}"
+  [ -d "$set_dir" ] || _die "no such snapshot set: ${set_dir}"
+
+  if [ -n "$tag_value" ]; then
+    printf '%s' "$tag_value" > "${set_dir}/tag"
+    _info "Tagged ${set_name}: ${tag_value}"
+  else
+    rm -f "${set_dir}/tag"
+    _info "Cleared tag for ${set_name}"
+  fi
+}
+
+cmd_trunk_mount() {
+  _require_root
+  _require_trunk_uuid
+
+  local mapper_dev="/dev/mapper/${TRUNK_LUKS_MAPPER_NAME}"
+  if [ -e "$mapper_dev" ]; then
+    _info "LUKS mapping '${TRUNK_LUKS_MAPPER_NAME}' is already open (${mapper_dev})"
+  else
+    local by_uuid="/dev/disk/by-uuid/${TRUNK_LUKS_UUID}"
+    [ -e "$by_uuid" ] || \
+      _die "no block device found at ${by_uuid}"
+
+    local discard_flags=()
+    [ "$TRUNK_DISCARDS" = "0" ] || discard_flags=(--allow-discards)
+
+    _info "Opening trunk LUKS device (${TRUNK_LUKS_MAPPER_NAME}) ..."
+    if [ -f "$TRUNK_LUKS_KEYFILE" ]; then
+      cryptsetup luksOpen "$by_uuid" "$TRUNK_LUKS_MAPPER_NAME" \
+        --key-file "$TRUNK_LUKS_KEYFILE" "${discard_flags[@]}"
+    else
+      cryptsetup luksOpen "$by_uuid" "$TRUNK_LUKS_MAPPER_NAME" "${discard_flags[@]}"
+    fi
+  fi
+
+  if mountpoint -q "$TRUNK_MOUNT_POINT"; then
+    _info "${TRUNK_MOUNT_POINT} is already mounted"
+    return
+  fi
+
+  _mount_point "$TRUNK_MOUNT_POINT"
+  _info "Trunk mounted at ${TRUNK_MOUNT_POINT}"
+}
+
+cmd_trunk_umount() {
+  _require_root
+
+  if mountpoint -q "$TRUNK_MOUNT_POINT"; then
+    _umount_point "$TRUNK_MOUNT_POINT"
+  else
+    _info "${TRUNK_MOUNT_POINT} is already unmounted"
+  fi
+
+  _info "Closing trunk LUKS device (${TRUNK_LUKS_MAPPER_NAME}) ..."
+  cryptsetup luksClose "$TRUNK_LUKS_MAPPER_NAME"
+  _info "Trunk unmounted and LUKS device closed"
+}
+_ensure_trunk_host_subvol() {
+  local dir="$1"
+  if [ ! -e "$dir" ]; then
+    _info "Creating trunk subvolume: ${dir}"
+    btrfs subvolume create "$dir" > /dev/null
+  elif ! btrfs subvolume show "$dir" > /dev/null 2>&1; then
+    _die "${dir} exists but is not a btrfs subvolume"
+  fi
+}
+_trunk_id() {
+  local trunk_id_file="${TRUNK_MOUNT_POINT}/.id"
+  [ -f "$trunk_id_file" ] || \
+    _die "missing ${trunk_id_file}; trunk drive must have an .id marker file"
+  local trunk_id
+  trunk_id=$(cat "$trunk_id_file")
+  [ -n "$trunk_id" ] || _die "${trunk_id_file} is empty"
+  echo "$trunk_id"
+}
+
+cmd_trunk_id() {
+  [ $# -eq 0 ] || _die "trunk id: usage: trunk id"
+  _ensure_trunk_mounted
+  _trunk_id
+}
+
+cmd_trunk_backup() {
+  local host=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --host)
+        [ $# -ge 2 ] || _die "--host requires an argument"
+        host="$2"
+        shift 2
+        ;;
+      *)
+        _die "trunk backup: unknown argument: $1"
+        ;;
+    esac
+  done
+
+  _require_root
+  _require_trunk_uuid
+  _ensure_trunk_mounted
+
+  local trunk_id
+  trunk_id=$(_trunk_id)
+
+  _trunk_backup "$trunk_id" "$host"
+}
+
+_src_run() {
+  if [ -n "${SRC_HOST:-}" ]; then
+    _remote_root "$SRC_HOST" "$SRC_PW" "$1"
+  else
+    sh -c "$1"
+  fi
+}
+
+_src_send_receive() {
+  if [ -n "${SRC_HOST:-}" ]; then
+    printf '%s\n' "$SRC_PW" | _ssh "$SRC_HOST" "sudo -S $1 2>/dev/null" | btrfs receive "$2"
+  else
+    eval "$1" | btrfs receive "$2"
+  fi
+}
+
+_trunk_backup() {
+  local trunk_id="$1" host="${2:-}"
+  local label snapshots_dir subvols
+
+  SRC_HOST=""
+  SRC_PW=""
+  if [ -n "$host" ]; then
+    SRC_HOST="$host"
+    _remote_config "$host"
+    label="$REMOTE_HOST_LABEL"
+    snapshots_dir="${REMOTE_BTRFS_MOUNT_POINT}/@snapshots"
+    subvols=("${REMOTE_SUBVOLUMES[@]}")
+
+    _info "prompting for remote password for ${host}:"
+    read -rs SRC_PW
+    echo >&2
+
+    _src_run "mountpoint -q '${REMOTE_BTRFS_MOUNT_POINT}' || mount '${REMOTE_BTRFS_MOUNT_POINT}'" || \
+      _die "failed to ensure ${REMOTE_BTRFS_MOUNT_POINT} is mounted on ${host}"
+  else
+    _ensure_btrfs_mounted
+    label="$HOST_LABEL"
+    snapshots_dir="${BTRFS_MOUNT_POINT}/@snapshots"
+    subvols=("${SUBVOLUMES[@]}")
+  fi
+
+  local latest_link="${snapshots_dir}/latest"
+  local parent_link="${snapshots_dir}/trunk_${trunk_id}"
+  local err_no_latest err_latest_dangling err_parent_dangling
+  if [ -n "$host" ]; then
+    err_no_latest="no latest snapshot set found on ${host}"
+    err_latest_dangling="latest snapshot symlink on ${host} is dangling"
+    err_parent_dangling="trunk_${trunk_id} tracking symlink on ${host} is dangling"
+  else
+    err_no_latest="no ${latest_link} symlink found"
+    err_latest_dangling="${latest_link} is dangling"
+    err_parent_dangling="${parent_link} is dangling"
+  fi
+
+  local resolved_latest
+  resolved_latest=$(_src_run "readlink -f '${latest_link}'" 2>/dev/null || true)
+  [ -n "$resolved_latest" ] || _die "$err_no_latest"
+  _src_run "test -d '${resolved_latest}'" || _die "$err_latest_dangling"
+  local set_timestamp
+  set_timestamp=$(basename "$resolved_latest")
+
+  local parent_timestamp=""
+  if _src_run "test -e '${parent_link}' || test -L '${parent_link}'"; then
+    local resolved_parent
+    resolved_parent=$(_src_run "readlink -f '${parent_link}'" 2>/dev/null || true)
+    if [ -n "$resolved_parent" ] && _src_run "test -d '${resolved_parent}'"; then
+      parent_timestamp=$(basename "$resolved_parent")
+    else
+      _die "$err_parent_dangling"
+    fi
+  fi
+
+  local target_host_dir="${TRUNK_MOUNT_POINT}/@${label}"
+  _ensure_trunk_host_subvol "$target_host_dir"
+
+  local target_set_dir="${target_host_dir}/${set_timestamp}"
+  mkdir -p "$target_set_dir"
+
+  local subvol current_path parent_path send_cmd kind
+  for subvol in "${subvols[@]}"; do
+    current_path=$(_snapshot_subvol_path "${snapshots_dir}/${set_timestamp}" "$set_timestamp" "$label" "$subvol")
+    if ! _src_run "test -e '${current_path}'"; then
+      if [ -n "$host" ]; then
+        _error "expected remote snapshot not found: ${host}:${current_path}"
+        return 1
+      fi
+      _die "expected snapshot not found: ${current_path}"
+    fi
+
+    parent_path=""
+    if [ -n "$parent_timestamp" ]; then
+      local candidate
+      candidate=$(_snapshot_subvol_path "${snapshots_dir}/${parent_timestamp}" "$parent_timestamp" "$label" "$subvol")
+      _src_run "test -e '${candidate}'" && parent_path="$candidate"
+    fi
+
+    _info "Backing up ${host:+${host}:}${subvol} (${set_timestamp}) to ${target_set_dir} ..."
+    if [ -n "$parent_path" ]; then
+      send_cmd="btrfs send -p '${parent_path}' '${current_path}'"
+      kind="incremental"
+    else
+      send_cmd="btrfs send '${current_path}'"
+      kind="full"
+    fi
+
+    if ! _src_send_receive "$send_cmd" "$target_set_dir"; then
+      if [ -n "$host" ]; then
+        _error "send/receive failed for ${host}:${subvol} -- any partially-received data under ${target_set_dir} requires clean up"
+      else
+        _error "${kind} send/receive failed for ${subvol} -- any partially-received data under ${target_set_dir} requires clean up"
+      fi
+      return 1
+    fi
+  done
+
+  local sidecar src_set_dir="${snapshots_dir}/${set_timestamp}" tmp
+  for sidecar in tag immutables; do
+    _src_run "test -f '${src_set_dir}/${sidecar}'" || continue
+    tmp=$(mktemp)
+    _src_run "cat '${src_set_dir}/${sidecar}'" > "$tmp"
+    install -m 644 "$tmp" "${target_set_dir}/${sidecar}"
+    rm -f "$tmp"
+  done
+
+  if [ -n "$host" ]; then
+    _info "setting trunk_${trunk_id} -> ${set_timestamp} on ${host}"
+    local symlink_cmd="if [ -e '${parent_link}' ] && [ ! -L '${parent_link}' ]; then exit 1; fi; ln -sfn '${set_timestamp}' '${parent_link}'"
+    if ! _src_run "$symlink_cmd"; then
+      _warn "backup succeeded, but could not update remote trunk_${trunk_id} symlink on ${host}"
+    fi
+  else
+    _info "Setting trunk_${trunk_id} -> ${set_timestamp}"
+    _update_symlink "$set_timestamp" "$parent_link" || true
+  fi
+
+  _info "Backed up ${label}/${set_timestamp}${host:+ (remote: ${host})} to trunk (id: ${trunk_id})"
+}
+
+cmd_trunk_list() {
+  [ $# -le 1 ] || _die "trunk list: usage: trunk list [HOST]"
+
+  local label="${1:-$HOST_LABEL}"
+  case "$label" in
+    --*) _die "trunk list: HOST is a positional argument, not a flag" ;;
+  esac
+
+  _ensure_trunk_mounted
+
+  local host_dir="${TRUNK_MOUNT_POINT}/@${label}"
+  if [ ! -d "$host_dir" ]; then
+    _info "No trunk backups found for host '${label}'."
+    return
+  fi
+
+  printf '%s%-20s  %s%s\n' "$OUT_BOLD" "SET" "TAG" "$OUT_RESET"
+  local found=0 d set_name tag
+  for d in "$host_dir"/*/; do
+    set_name=$(basename "$d")
+    _is_set_name "$set_name" || continue
+    tag=$(_read_tag "${d%/}")
+    printf '%-20s  %s\n' "$set_name" "$tag"
+    found=1
+  done
+  [ "$found" -eq 1 ] || _info "No snapshot sets found for host '${label}'."
+}
+
+cmd_trunk_rm() {
+  [ $# -eq 1 ] || _die "trunk rm: usage: trunk rm HOST/SET_NAME"
+  local arg="$1"
+  case "$arg" in
+    */*) : ;;
+    *) _die "trunk rm: expected HOST/SET_NAME (e.g. remotehost/2025-01-15-120000)" ;;
+  esac
+  local host_label="${arg%%/*}"
+  local set_name="${arg#*/}"
+  [ -n "$host_label" ] && [ -n "$set_name" ] || _die "trunk rm: expected HOST/SET_NAME"
+
+  _ensure_trunk_mounted
+
+  local set_dir="${TRUNK_MOUNT_POINT}/@${host_label}/${set_name}"
+  [ -d "$set_dir" ] || _die "no such trunk snapshot set: ${set_dir}"
+
+  _delete_set_dir "$set_dir" || return 1
+  _info "Removed trunk snapshot set: ${host_label}/${set_name}"
+}
+
+cmd_config() {
+  echo "HOST_LABEL=${HOST_LABEL}"
+  echo "BTRFS_MOUNT_POINT=${BTRFS_MOUNT_POINT}"
+  echo "SUBVOLUMES=(${SUBVOLUMES[*]})"
+  echo "TRUNK_LUKS_UUID=${TRUNK_LUKS_UUID}"
+  echo "TRUNK_LUKS_KEYFILE=${TRUNK_LUKS_KEYFILE}"
+  echo "TRUNK_DISCARDS=${TRUNK_DISCARDS}"
+  echo "TRUNK_MOUNT_POINT=${TRUNK_MOUNT_POINT}"
+  echo "SSH_USER=${SSH_USER}"
+}
+
+cmd_help() {
+  local c_reset='' c_bold='' c_var=''
+  if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    c_reset=$'\033[0m'
+    c_bold=$'\033[1m'
+    c_var=$'\033[33m'
+  fi
+
+  cat <<EOF
+
+${c_bold}btrctl${c_reset} - Btrfs snapshot and trunk backup tool
+
+${c_bold}USAGE:${c_reset}
+  ${c_bold}btrctl${c_reset} <command> [options]
+
+${c_bold}COMMANDS:${c_reset}
+  ${c_bold}mount${c_reset}
+      Mount \$BTRFS_MOUNT_POINT. Says so and exits if already mounted.
+
+  ${c_bold}umount${c_reset}
+  ${c_bold}unmount${c_reset}
+      Unmount \$BTRFS_MOUNT_POINT. Says so and exits if already unmounted.
+
+  ${c_bold}snapshot${c_reset} [--tag ${c_var}NAME${c_reset}] [--host ${c_var}HOST${c_reset}]
+      Take a snapshot set of all configured subvolumes under \$BTRFS_MOUNT_POINT.
+      Mounts \$BTRFS_MOUNT_POINT automatically if not already mounted.
+      Records immutable-flagged files/dirs for each snapshot (lost on
+      send/receive otherwise).
+
+        --tag ${c_var}NAME${c_reset}          Attach a human-readable tag to this snapshot set
+        --host ${c_var}HOST${c_reset}         Run against HOST instead of the local machine
+                              (via SSH; prompts once for HOST's sudo password)
+
+  ${c_bold}list${c_reset} [--host ${c_var}HOST${c_reset}]
+      List local snapshot sets: timestamp, tag if present, and FLAGS
+      ("latest" and/or any trunk_<id> this set was last backed up to).
+
+        --host ${c_var}HOST${c_reset}         Run against HOST instead of the local machine
+                              (via SSH; prompts once for HOST's sudo password)
+
+  ${c_bold}latest${c_reset} [--host ${c_var}HOST${c_reset}]
+      Print just the timestamp ID of the latest local snapshot set, and
+      nothing else -- suitable for capturing in scripts.
+
+        --host ${c_var}HOST${c_reset}         Run against HOST instead of the local machine
+                              (via SSH; prompts once for HOST's sudo password)
+
+  ${c_bold}rm${c_reset} ${c_var}SET_NAME${c_reset} [--host ${c_var}HOST${c_reset}]
+      Remove a local snapshot set by timestamp name. Prompts for
+      confirmation before deleting.
+
+        --host ${c_var}HOST${c_reset}         Run against HOST instead of the local machine
+
+  ${c_bold}tag${c_reset} ${c_var}SET_ID${c_reset} ${c_var}TAG_NAME${c_reset} [--host ${c_var}HOST${c_reset}]
+      Set or update the tag on an existing local snapshot set. An empty
+      TAG_NAME clears the tag.
+
+        --host ${c_var}HOST${c_reset}         Run against HOST instead of the local machine
+
+  ${c_bold}trunk mount${c_reset}
+      Unlock (LUKS) and mount the trunk backup device at \$TRUNK_MOUNT_POINT.
+      Each step is skipped (with a message) if already done.
+
+  ${c_bold}trunk umount${c_reset}
+  ${c_bold}trunk unmount${c_reset}
+      Unmount \$TRUNK_MOUNT_POINT and close the LUKS device. The unmount
+      step is skipped (with a message) if already unmounted, but the LUKS
+      device is always closed regardless.
+
+  ${c_bold}trunk id${c_reset}
+      Print the currently mounted trunk device's short identifier (the
+      \$TRUNK_MOUNT_POINT/.id marker file content used in trunk_<id>
+      tracking symlinks), e.g. "a".
+
+  ${c_bold}trunk backup${c_reset} [--host ${c_var}HOST${c_reset}]
+      Back up the latest snapshot set to the currently mounted trunk device.
+      Always runs on the machine trunk is physically attached to.
+      If /trunk/@<HOST_LABEL> does not exist, it is created automatically
+      as a new subvolume. If it exists but is not a btrfs subvolume,
+      aborts with an error.
+
+        --host ${c_var}HOST${c_reset}         Back up HOST's latest snapshot set instead of
+                              the local machine's
+
+  ${c_bold}trunk list${c_reset} [${c_var}HOST${c_reset}]
+      List snapshot sets stored on trunk for a given host (default: local
+      machine's HOST_LABEL). HOST is a HOST_LABEL, not an SSH alias, and
+      no SSH connection is ever made (same as trunk rm's HOST).
+
+  ${c_bold}trunk rm${c_reset} ${c_var}HOST${c_reset}/${c_var}SET_NAME${c_reset}
+      Remove a snapshot set from trunk. HOST is required and explicit;
+      there is no implicit "local machine" default for this destructive
+      operation. Prompts for confirmation before deleting.
+
+  ${c_bold}config${c_reset}
+      Print effective configuration as KEY=value pairs.
+
+  ${c_bold}help${c_reset}, ${c_bold}-h${c_reset}, ${c_bold}--help${c_reset}
+      Show this help text.
+
+EOF
+}
+
+main() {
+  if [ "${1:-}" = "--remote-label" ]; then
+    [ $# -ge 2 ] || _die "--remote-label requires an argument"
+    REMOTE_LABEL="$2"
+    shift 2
+  fi
+
+  local cmd="${1:-}"
+  case "$cmd" in
+    "")                    cmd_help; exit 1  ;;
+    help|-h|--help)        cmd_help          ;;
+    mount)          shift; cmd_mount "$@"    ;;
+    umount|unmount) shift; cmd_umount "$@"   ;;
+    snapshot)       shift; cmd_snapshot "$@" ;;
+    list)           shift; cmd_list "$@"     ;;
+    latest)         shift; cmd_latest "$@"   ;;
+    rm)             shift; cmd_rm "$@"       ;;
+    tag)            shift; cmd_tag "$@"      ;;
+    config)         shift; cmd_config "$@"   ;;
+    trunk)
+      shift
+      local sub="${1:-}"
+      case "$sub" in
+        mount)          shift; cmd_trunk_mount "$@"  ;;
+        umount|unmount) shift; cmd_trunk_umount "$@" ;;
+        id)             shift; cmd_trunk_id "$@"     ;;
+        backup)         shift; cmd_trunk_backup "$@" ;;
+        list)           shift; cmd_trunk_list "$@"   ;;
+        rm)             shift; cmd_trunk_rm "$@"     ;;
+        *) _die "unknown trunk subcommand: ${sub:-<none>}" ;;
+      esac ;;
+    *) _die "unknown command: ${cmd}" ;;
+  esac
+}
+
+[ "${BASH_SOURCE[0]}" = "${0}" ] && main "$@"
