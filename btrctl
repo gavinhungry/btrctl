@@ -864,112 +864,24 @@ ${c_bold}btrctl${c_reset} - Btrfs snapshot and trunk backup tool
 ${c_bold}USAGE:${c_reset}
   ${c_bold}btrctl${c_reset} <command> [options]
 
-${c_bold}ENVIRONMENT:${c_reset}
-  ${c_bold}BTRCTL_CONF${c_reset}=${c_var}FILE${c_reset}
-      Overlay config file, sourced after /etc/btrctl.conf. Values set in
-      FILE override the base config; anything not set in FILE is
-      inherited from /etc/btrctl.conf. Useful for a second, independent
-      btrfs pool on the same host (its own HOST_LABEL/BTRFS_MOUNT_POINT/
-      SUBVOLUMES) while still sharing TRUNK_*/SSH_USER settings from the
-      base config. If set and FILE does not exist, this is a hard error.
-      Preserved automatically across the automatic sudo elevation that
-      happens when btrctl isn't already running as root.
-
 ${c_bold}COMMANDS:${c_reset}
   ${c_bold}mount${c_reset} [--host ${c_var}HOST${c_reset}]
-      Mount \$BTRFS_MOUNT_POINT. Says so and exits if already mounted.
-
-        --host ${c_var}HOST${c_reset}         Run against HOST instead of the local machine
-
-  ${c_bold}umount${c_reset} [--host ${c_var}HOST${c_reset}]
-  ${c_bold}unmount${c_reset} [--host ${c_var}HOST${c_reset}]
-      Unmount \$BTRFS_MOUNT_POINT. Says so and exits if already unmounted.
-
-        --host ${c_var}HOST${c_reset}         Run against HOST instead of the local machine
-
+  ${c_bold}umount|unmount${c_reset} [--host ${c_var}HOST${c_reset}]
   ${c_bold}snapshot${c_reset} [--tag ${c_var}NAME${c_reset}] [--host ${c_var}HOST${c_reset}]
-      Take a snapshot set of all configured subvolumes under \$BTRFS_MOUNT_POINT.
-      Mounts \$BTRFS_MOUNT_POINT automatically if not already mounted.
-      If \$BTRFS_MOUNT_POINT/btrctl-pre-snapshot exists and is executable,
-      it is run (cwd = \$BTRFS_MOUNT_POINT) before snapshotting begins; a
-      non-zero exit aborts the snapshot before any subvolumes are touched.
-      Records immutable-flagged files/dirs for each snapshot (lost on
-      send/receive otherwise).
-
-        --tag ${c_var}NAME${c_reset}          Attach a human-readable tag to this snapshot set
-        --host ${c_var}HOST${c_reset}         Run against HOST instead of the local machine
-
   ${c_bold}list${c_reset} [--host ${c_var}HOST${c_reset}]
-      List local snapshot sets: timestamp, tag if present, and FLAGS
-      ("latest" and/or any trunk_<id> this set was last backed up to).
-
-        --host ${c_var}HOST${c_reset}         Run against HOST instead of the local machine
-
   ${c_bold}latest${c_reset} [--host ${c_var}HOST${c_reset}]
-      Print just the timestamp ID of the latest local snapshot set, and
-      nothing else -- suitable for capturing in scripts.
-
-        --host ${c_var}HOST${c_reset}         Run against HOST instead of the local machine
-
   ${c_bold}rm${c_reset} ${c_var}SET_NAME${c_reset} [--host ${c_var}HOST${c_reset}]
-      Remove a local snapshot set by timestamp name. Prompts for
-      confirmation before deleting.
-
-        --host ${c_var}HOST${c_reset}         Run against HOST instead of the local machine
-
   ${c_bold}tag${c_reset} ${c_var}SET_ID${c_reset} ${c_var}TAG_NAME${c_reset} [--host ${c_var}HOST${c_reset}]
-      Set or update the tag on an existing local snapshot set. An empty
-      TAG_NAME clears the tag.
-
-        --host ${c_var}HOST${c_reset}         Run against HOST instead of the local machine
 
   ${c_bold}trunk mount${c_reset}
-      Unlock (LUKS) and mount the trunk backup device at \$TRUNK_MOUNT_POINT.
-      Each step is skipped (with a message) if already done.
-
-  ${c_bold}trunk umount${c_reset}
-  ${c_bold}trunk unmount${c_reset}
-      Unmount \$TRUNK_MOUNT_POINT and close the LUKS device. The unmount
-      step is skipped (with a message) if already unmounted, but the LUKS
-      device is always closed regardless.
-
+  ${c_bold}trunk umount|unmount${c_reset}
   ${c_bold}trunk id${c_reset}
-      Print the currently mounted trunk device's short identifier (the
-      \$TRUNK_MOUNT_POINT/.trunk-id marker file content used in trunk_<id>
-      tracking symlinks), e.g. "a".
-
   ${c_bold}trunk backup${c_reset} [--host ${c_var}HOST${c_reset}]
-      Back up the latest snapshot set to the currently mounted trunk device.
-      Always runs on the machine trunk is physically attached to.
-      If /trunk/@<HOST_LABEL> does not exist, it is created automatically
-      as a new subvolume, along with a /trunk/@<HOST_LABEL>/.btrctl marker
-      file. If it exists but is not a btrfs subvolume, or exists without
-      the .btrctl marker, aborts with an error (the marker distinguishes
-      btrctl-managed subvolumes from other, unrelated subvolumes that may
-      also live on trunk). To adopt a pre-existing subvolume, manually
-      create an empty .btrctl file inside it.
-
-        --host ${c_var}HOST${c_reset}         Back up HOST's latest snapshot set instead of
-                              the local machine's
-
   ${c_bold}trunk list${c_reset} [${c_var}HOST${c_reset}]
-      List snapshot sets stored on trunk for a given host (default: local
-      machine's HOST_LABEL). HOST is a HOST_LABEL, not an SSH alias, and
-      no SSH connection is ever made (same as trunk rm's HOST). Aborts
-      with an error if /trunk/@<HOST_LABEL> exists but is missing its
-      .btrctl marker.
-
   ${c_bold}trunk rm${c_reset} ${c_var}HOST${c_reset}/${c_var}SET_NAME${c_reset}
-      Remove a snapshot set from trunk. HOST is required and explicit;
-      there is no implicit "local machine" default for this destructive
-      operation. Prompts for confirmation before deleting. Aborts with an
-      error if /trunk/@HOST exists but is missing its .btrctl marker.
 
   ${c_bold}config${c_reset}
-      Print effective configuration as KEY=value pairs.
-
   ${c_bold}help${c_reset}, ${c_bold}-h${c_reset}, ${c_bold}--help${c_reset}
-      Show this help text.
 
 EOF
 }
