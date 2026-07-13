@@ -380,7 +380,7 @@ cmd_snapshot() {
   ) > "${snapshot_dir}/immutables"
 
   if [ -n "$tag" ]; then
-    printf '%s' "$tag" > "${snapshot_dir}/tag"
+    printf '%s\n' "$tag" > "${snapshot_dir}/tag"
   fi
 
   _info "Setting latest -> ${now}"
@@ -576,7 +576,7 @@ cmd_tag() {
   [ -d "$set_dir" ] || _die "no such snapshot set: ${set_dir}"
 
   if [ -n "$tag_value" ]; then
-    printf '%s' "$tag_value" > "${set_dir}/tag"
+    printf '%s\n' "$tag_value" > "${set_dir}/tag"
     _info "Tagged ${set_name}: ${tag_value}"
   else
     rm -f "${set_dir}/tag"
