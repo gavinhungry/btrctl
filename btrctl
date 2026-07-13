@@ -161,6 +161,15 @@ _read_tag() {
   [ -f "${1}/tag" ] && cat "${1}/tag" || true
 }
 
+_write_tag() {
+  local dir="$1" value="$2"
+  if [ -n "$value" ]; then
+    printf '%s\n' "$value" > "${dir}/tag"
+  else
+    rm -f "${dir}/tag"
+  fi
+}
+
 _next_most_recent_set() {
   local dir="$1" d name
   local names=()
@@ -264,25 +273,41 @@ _remote_config() {
   [ "${#REMOTE_SUBVOLUMES[@]}" -gt 0 ] || _die "could not determine SUBVOLUMES from ${host}"
 }
 
-cmd_mount() {
-  local host=""
+_consume_opt_value() {
+  local -n _out="$1"; shift
+  [ $# -ge 2 ] || _die "$1 requires an argument"
+  _out="$2"
+}
+
+_parse_host_only_args() {
+  local cmd_name="$1" varname="$2"; shift 2
+  local -n _out="$varname"
+  _out=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --host)
-        [ $# -ge 2 ] || _die "--host requires an argument"
-        host="$2"
+        _consume_opt_value "$varname" "$@"
         shift 2
         ;;
       *)
-        _die "mount: unknown argument: $1"
+        _die "${cmd_name}: unknown argument: $1"
         ;;
     esac
   done
+}
 
-  if [ -n "$host" ]; then
-    _dispatch_remote "$host" mount
-    return
-  fi
+_maybe_dispatch_remote() {
+  local host="$1" subcmd="$2"; shift 2
+  [ -n "$host" ] || return 1
+  _dispatch_remote "$host" "$subcmd" "$@"
+  return 0
+}
+
+cmd_mount() {
+  local host
+  _parse_host_only_args mount host "$@"
+
+  _maybe_dispatch_remote "$host" mount && return
 
   _require_root
   if mountpoint -q "$BTRFS_MOUNT_POINT"; then
@@ -294,24 +319,10 @@ cmd_mount() {
 }
 
 cmd_umount() {
-  local host=""
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --host)
-        [ $# -ge 2 ] || _die "--host requires an argument"
-        host="$2"
-        shift 2
-        ;;
-      *)
-        _die "umount: unknown argument: $1"
-        ;;
-    esac
-  done
+  local host
+  _parse_host_only_args umount host "$@"
 
-  if [ -n "$host" ]; then
-    _dispatch_remote "$host" umount
-    return
-  fi
+  _maybe_dispatch_remote "$host" umount && return
 
   _require_root
   if ! mountpoint -q "$BTRFS_MOUNT_POINT"; then
@@ -327,13 +338,11 @@ cmd_snapshot() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --tag)
-        [ $# -ge 2 ] || _die "--tag requires an argument"
-        tag="$2"
+        _consume_opt_value tag "$@"
         shift 2
         ;;
       --host)
-        [ $# -ge 2 ] || _die "--host requires an argument"
-        host="$2"
+        _consume_opt_value host "$@"
         shift 2
         ;;
       *)
@@ -342,10 +351,7 @@ cmd_snapshot() {
     esac
   done
 
-  if [ -n "$host" ]; then
-    _dispatch_remote "$host" snapshot --tag "$tag"
-    return
-  fi
+  _maybe_dispatch_remote "$host" snapshot --tag "$tag" && return
 
   _ensure_btrfs_mounted
   _run_pre_snapshot_script
@@ -379,9 +385,7 @@ cmd_snapshot() {
     done
   ) > "${snapshot_dir}/immutables"
 
-  if [ -n "$tag" ]; then
-    printf '%s\n' "$tag" > "${snapshot_dir}/tag"
-  fi
+  _write_tag "$snapshot_dir" "$tag"
 
   _info "Setting latest -> ${now}"
   _update_symlink "$now" "${BTRFS_MOUNT_POINT}/${snapshots_subvol}/latest" || true
@@ -390,24 +394,10 @@ cmd_snapshot() {
 }
 
 cmd_list() {
-  local host=""
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --host)
-        [ $# -ge 2 ] || _die "--host requires an argument"
-        host="$2"
-        shift 2
-        ;;
-      *)
-        _die "list: unknown argument: $1"
-        ;;
-    esac
-  done
+  local host
+  _parse_host_only_args list host "$@"
 
-  if [ -n "$host" ]; then
-    _dispatch_remote "$host" list
-    return
-  fi
+  _maybe_dispatch_remote "$host" list && return
 
   _ensure_btrfs_mounted
 
@@ -458,24 +448,10 @@ cmd_list() {
 }
 
 cmd_latest() {
-  local host=""
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --host)
-        [ $# -ge 2 ] || _die "--host requires an argument"
-        host="$2"
-        shift 2
-        ;;
-      *)
-        _die "latest: unknown argument: $1"
-        ;;
-    esac
-  done
+  local host
+  _parse_host_only_args latest host "$@"
 
-  if [ -n "$host" ]; then
-    _dispatch_remote "$host" latest
-    return
-  fi
+  _maybe_dispatch_remote "$host" latest && return
 
   _ensure_btrfs_mounted
 
@@ -491,8 +467,7 @@ cmd_rm() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --host)
-        [ $# -ge 2 ] || _die "--host requires an argument"
-        host="$2"
+        _consume_opt_value host "$@"
         shift 2
         ;;
       -*)
@@ -507,10 +482,7 @@ cmd_rm() {
   done
   [ -n "$set_name" ] || _die "rm: SET_NAME is required"
 
-  if [ -n "$host" ]; then
-    _dispatch_remote "$host" rm "$set_name"
-    return
-  fi
+  _maybe_dispatch_remote "$host" rm "$set_name" && return
 
   _ensure_btrfs_mounted
 
@@ -540,8 +512,7 @@ cmd_tag() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --host)
-        [ $# -ge 2 ] || _die "--host requires an argument"
-        host="$2"
+        _consume_opt_value host "$@"
         shift 2
         ;;
       -*)
@@ -564,10 +535,7 @@ cmd_tag() {
   [ "$got_set" -eq 1 ] || _die "tag: usage: tag SET_ID TAG_NAME"
   [ "$got_tag" -eq 1 ] || _die "tag: usage: tag SET_ID TAG_NAME (empty string clears the tag)"
 
-  if [ -n "$host" ]; then
-    _dispatch_remote "$host" tag "$set_name" "$tag_value"
-    return
-  fi
+  _maybe_dispatch_remote "$host" tag "$set_name" "$tag_value" && return
 
   _ensure_btrfs_mounted
 
@@ -575,11 +543,10 @@ cmd_tag() {
   local set_dir="${snapshots_dir}/${set_name}"
   [ -d "$set_dir" ] || _die "no such snapshot set: ${set_dir}"
 
+  _write_tag "$set_dir" "$tag_value"
   if [ -n "$tag_value" ]; then
-    printf '%s\n' "$tag_value" > "${set_dir}/tag"
     _info "Tagged ${set_name}: ${tag_value}"
   else
-    rm -f "${set_dir}/tag"
     _info "Cleared tag for ${set_name}"
   fi
 }
@@ -665,19 +632,8 @@ cmd_trunk_id() {
 }
 
 cmd_trunk_backup() {
-  local host=""
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --host)
-        [ $# -ge 2 ] || _die "--host requires an argument"
-        host="$2"
-        shift 2
-        ;;
-      *)
-        _die "trunk backup: unknown argument: $1"
-        ;;
-    esac
-  done
+  local host
+  _parse_host_only_args "trunk backup" host "$@"
 
   _require_root
   _require_trunk_uuid
@@ -1020,8 +976,7 @@ EOF
 
 main() {
   if [ "${1:-}" = "--remote-label" ]; then
-    [ $# -ge 2 ] || _die "--remote-label requires an argument"
-    REMOTE_LABEL="$2"
+    _consume_opt_value REMOTE_LABEL "$@"
     shift 2
   fi
 
