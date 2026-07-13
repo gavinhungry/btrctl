@@ -23,6 +23,9 @@ COMMANDS:
   snapshot [--tag NAME] [--host HOST]
       Take a snapshot set of all configured subvolumes under $BTRFS_MOUNT_POINT.
       Mounts $BTRFS_MOUNT_POINT automatically if not already mounted.
+      If $BTRFS_MOUNT_POINT/btrctl-pre-snapshot exists and is executable,
+      it is run (cwd = $BTRFS_MOUNT_POINT) before snapshotting begins; a
+      non-zero exit aborts the snapshot before any subvolumes are touched.
       Records immutable-flagged files/dirs for each snapshot (lost on
       send/receive otherwise).
 
