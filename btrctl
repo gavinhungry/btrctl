@@ -131,7 +131,6 @@ _run_pre_snapshot_script() {
   _info "Running pre-snapshot script (${script}) ..."
   (cd "$BTRFS_MOUNT_POINT" && "$script") || \
     _die "pre-snapshot script failed (${script}); aborting snapshot"
-  _info "Pre-snapshot script completed"
 }
 
 _ensure_trunk_mounted() {
