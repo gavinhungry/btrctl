@@ -177,6 +177,7 @@ _delete_set_dir() {
   local set_dir="$1" subvol_path
   _info "This will permanently delete: ${set_dir}"
   _confirm "Proceed?" || { _info "Aborted."; return 1; }
+  _info "Deleting snapshots ..."
   for subvol_path in "$set_dir"/@snapshot-*; do
     btrfs subvolume delete "$subvol_path"
   done
@@ -356,6 +357,7 @@ cmd_snapshot() {
 
   mkdir -p "$snapshot_dir"
 
+  _info "Creating snapshot set ${now} ..."
   local subvol snapshot_name
   (
     cd "$BTRFS_MOUNT_POINT"
