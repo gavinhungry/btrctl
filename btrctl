@@ -285,7 +285,7 @@ cmd_mount() {
 
   _require_root
   if mountpoint -q "$BTRFS_MOUNT_POINT"; then
-    _info "${BTRFS_MOUNT_POINT} is already mounted"
+    _warn "${BTRFS_MOUNT_POINT} is already mounted"
     return
   fi
   _mount_point "$BTRFS_MOUNT_POINT"
@@ -314,7 +314,7 @@ cmd_umount() {
 
   _require_root
   if ! mountpoint -q "$BTRFS_MOUNT_POINT"; then
-    _info "${BTRFS_MOUNT_POINT} is already unmounted"
+    _warn "${BTRFS_MOUNT_POINT} is already unmounted"
     return
   fi
   _umount_point "$BTRFS_MOUNT_POINT"
@@ -588,7 +588,7 @@ cmd_trunk_mount() {
 
   local mapper_dev="/dev/mapper/${TRUNK_LUKS_MAPPER_NAME}"
   if [ -e "$mapper_dev" ]; then
-    _info "LUKS mapping '${TRUNK_LUKS_MAPPER_NAME}' is already open (${mapper_dev})"
+    _warn "LUKS mapping '${TRUNK_LUKS_MAPPER_NAME}' is already open (${mapper_dev})"
   else
     local by_uuid="/dev/disk/by-uuid/${TRUNK_LUKS_UUID}"
     [ -e "$by_uuid" ] || \
@@ -607,7 +607,7 @@ cmd_trunk_mount() {
   fi
 
   if mountpoint -q "$TRUNK_MOUNT_POINT"; then
-    _info "${TRUNK_MOUNT_POINT} is already mounted"
+    _warn "${TRUNK_MOUNT_POINT} is already mounted"
     return
   fi
 
@@ -621,7 +621,7 @@ cmd_trunk_umount() {
   if mountpoint -q "$TRUNK_MOUNT_POINT"; then
     _umount_point "$TRUNK_MOUNT_POINT"
   else
-    _info "${TRUNK_MOUNT_POINT} is already unmounted"
+    _warn "${TRUNK_MOUNT_POINT} is already unmounted"
   fi
 
   _info "Closing trunk LUKS device (${TRUNK_LUKS_MAPPER_NAME}) ..."
