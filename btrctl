@@ -305,8 +305,8 @@ _maybe_dispatch_remote() {
 
 cmd_mount() {
   local host
-  _parse_host_only_args mount host "$@"
 
+  _parse_host_only_args mount host "$@"
   _maybe_dispatch_remote "$host" mount && return
 
   _require_root
@@ -320,8 +320,8 @@ cmd_mount() {
 
 cmd_umount() {
   local host
-  _parse_host_only_args umount host "$@"
 
+  _parse_host_only_args umount host "$@"
   _maybe_dispatch_remote "$host" umount && return
 
   _require_root
@@ -352,7 +352,6 @@ cmd_snapshot() {
   done
 
   _maybe_dispatch_remote "$host" snapshot --tag "$tag" && return
-
   _ensure_btrfs_mounted
   _run_pre_snapshot_script
 
@@ -386,19 +385,16 @@ cmd_snapshot() {
   ) > "${snapshot_dir}/immutables"
 
   _write_tag "$snapshot_dir" "$tag"
-
   _info "Setting latest -> ${now}"
   _update_symlink "$now" "${BTRFS_MOUNT_POINT}/${snapshots_subvol}/latest" || true
-
   _info "Created snapshot set: ${now}${tag:+ (tag: ${tag})}"
 }
 
 cmd_list() {
   local host
+
   _parse_host_only_args list host "$@"
-
   _maybe_dispatch_remote "$host" list && return
-
   _ensure_btrfs_mounted
 
   local snapshots_dir="${BTRFS_MOUNT_POINT}/@snapshots"
@@ -449,10 +445,9 @@ cmd_list() {
 
 cmd_latest() {
   local host
+
   _parse_host_only_args latest host "$@"
-
   _maybe_dispatch_remote "$host" latest && return
-
   _ensure_btrfs_mounted
 
   local snapshots_dir="${BTRFS_MOUNT_POINT}/@snapshots"
@@ -483,7 +478,6 @@ cmd_rm() {
   [ -n "$set_name" ] || _die "rm: SET_NAME is required"
 
   _maybe_dispatch_remote "$host" rm "$set_name" && return
-
   _ensure_btrfs_mounted
 
   local snapshots_dir="${BTRFS_MOUNT_POINT}/@snapshots"
@@ -536,7 +530,6 @@ cmd_tag() {
   [ "$got_tag" -eq 1 ] || _die "tag: usage: tag SET_ID TAG_NAME (empty string clears the tag)"
 
   _maybe_dispatch_remote "$host" tag "$set_name" "$tag_value" && return
-
   _ensure_btrfs_mounted
 
   local snapshots_dir="${BTRFS_MOUNT_POINT}/@snapshots"
@@ -633,8 +626,8 @@ cmd_trunk_id() {
 
 cmd_trunk_backup() {
   local host
-  _parse_host_only_args "trunk backup" host "$@"
 
+  _parse_host_only_args "trunk backup" host "$@"
   _require_root
   _require_trunk_uuid
   _ensure_trunk_mounted
@@ -798,6 +791,7 @@ cmd_trunk_list() {
     _info "No trunk backups found for host '${label}'."
     return
   fi
+
   _require_btrctl_marker "$host_dir"
 
   printf '%s%-20s  %s%s\n' "$OUT_BOLD" "SET" "TAG" "$OUT_RESET"
