@@ -628,13 +628,22 @@ cmd_trunk_umount() {
   cryptsetup luksClose "$TRUNK_LUKS_MAPPER_NAME"
   _info "Trunk unmounted and LUKS device closed"
 }
+_require_btrctl_marker() {
+  local dir="$1"
+  [ -f "${dir}/.btrctl" ] || \
+    _die "${dir} exists but is not configured for btrctl (missing ${dir}/.btrctl)"
+}
+
 _ensure_trunk_host_subvol() {
   local dir="$1"
   if [ ! -e "$dir" ]; then
     _info "Creating trunk subvolume: ${dir}"
     btrfs subvolume create "$dir" > /dev/null
+    : > "${dir}/.btrctl"
   elif ! btrfs subvolume show "$dir" > /dev/null 2>&1; then
     _die "${dir} exists but is not a btrfs subvolume"
+  else
+    _require_btrctl_marker "$dir"
   fi
 }
 _trunk_id() {
@@ -831,6 +840,7 @@ cmd_trunk_list() {
     _info "No trunk backups found for host '${label}'."
     return
   fi
+  _require_btrctl_marker "$host_dir"
 
   printf '%s%-20s  %s%s\n' "$OUT_BOLD" "SET" "TAG" "$OUT_RESET"
   local found=0 d set_name tag
@@ -857,7 +867,11 @@ cmd_trunk_rm() {
 
   _ensure_trunk_mounted
 
-  local set_dir="${TRUNK_MOUNT_POINT}/@${host_label}/${set_name}"
+  local host_dir="${TRUNK_MOUNT_POINT}/@${host_label}"
+  [ -d "$host_dir" ] || _die "no such trunk host: ${host_dir}"
+  _require_btrctl_marker "$host_dir"
+
+  local set_dir="${host_dir}/${set_name}"
   [ -d "$set_dir" ] || _die "no such trunk snapshot set: ${set_dir}"
 
   _delete_set_dir "$set_dir" || return 1
@@ -970,8 +984,12 @@ ${c_bold}COMMANDS:${c_reset}
       Back up the latest snapshot set to the currently mounted trunk device.
       Always runs on the machine trunk is physically attached to.
       If /trunk/@<HOST_LABEL> does not exist, it is created automatically
-      as a new subvolume. If it exists but is not a btrfs subvolume,
-      aborts with an error.
+      as a new subvolume, along with a /trunk/@<HOST_LABEL>/.btrctl marker
+      file. If it exists but is not a btrfs subvolume, or exists without
+      the .btrctl marker, aborts with an error (the marker distinguishes
+      btrctl-managed subvolumes from other, unrelated subvolumes that may
+      also live on trunk). To adopt a pre-existing subvolume, manually
+      create an empty .btrctl file inside it.
 
         --host ${c_var}HOST${c_reset}         Back up HOST's latest snapshot set instead of
                               the local machine's
@@ -979,12 +997,15 @@ ${c_bold}COMMANDS:${c_reset}
   ${c_bold}trunk list${c_reset} [${c_var}HOST${c_reset}]
       List snapshot sets stored on trunk for a given host (default: local
       machine's HOST_LABEL). HOST is a HOST_LABEL, not an SSH alias, and
-      no SSH connection is ever made (same as trunk rm's HOST).
+      no SSH connection is ever made (same as trunk rm's HOST). Aborts
+      with an error if /trunk/@<HOST_LABEL> exists but is missing its
+      .btrctl marker.
 
   ${c_bold}trunk rm${c_reset} ${c_var}HOST${c_reset}/${c_var}SET_NAME${c_reset}
       Remove a snapshot set from trunk. HOST is required and explicit;
       there is no implicit "local machine" default for this destructive
-      operation. Prompts for confirmation before deleting.
+      operation. Prompts for confirmation before deleting. Aborts with an
+      error if /trunk/@HOST exists but is missing its .btrctl marker.
 
   ${c_bold}config${c_reset}
       Print effective configuration as KEY=value pairs.

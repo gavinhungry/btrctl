@@ -86,8 +86,12 @@ COMMANDS:
       Back up the latest snapshot set to the currently mounted trunk device.
       Always runs on the machine trunk is physically attached to.
       If /trunk/@<HOST_LABEL> does not exist, it is created automatically
-      as a new subvolume. If it exists but is not a btrfs subvolume,
-      aborts with an error.
+      as a new subvolume, along with a /trunk/@<HOST_LABEL>/.btrctl marker
+      file. If it exists but is not a btrfs subvolume, or exists without
+      the .btrctl marker, aborts with an error (the marker distinguishes
+      btrctl-managed subvolumes from other, unrelated subvolumes that may
+      also live on trunk). To adopt a pre-existing subvolume, manually
+      create an empty .btrctl file inside it.
 
         --host HOST         Back up HOST's latest snapshot set instead of
                               the local machine's
@@ -95,12 +99,15 @@ COMMANDS:
   trunk list [HOST]
       List snapshot sets stored on trunk for a given host (default: local
       machine's HOST_LABEL). HOST is a HOST_LABEL, not an SSH alias, and
-      no SSH connection is ever made (same as trunk rm's HOST).
+      no SSH connection is ever made (same as trunk rm's HOST). Aborts
+      with an error if /trunk/@<HOST_LABEL> exists but is missing its
+      .btrctl marker.
 
   trunk rm HOST/SET_NAME
       Remove a snapshot set from trunk. HOST is required and explicit;
       there is no implicit "local machine" default for this destructive
-      operation. Prompts for confirmation before deleting.
+      operation. Prompts for confirmation before deleting. Aborts with an
+      error if /trunk/@HOST exists but is missing its .btrctl marker.
 
   config
       Print effective configuration as KEY=value pairs.
