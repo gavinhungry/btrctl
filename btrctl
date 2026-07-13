@@ -69,11 +69,21 @@ _info() {
   _log "$ERR_BLUE" INFO "$@"
 }
 
+CONF_OVERLAY_FILE="${BTRCTL_CONF:-}"
+if [ -n "$CONF_OVERLAY_FILE" ]; then
+  [ -f "$CONF_OVERLAY_FILE" ] || _die "config overlay file not found: ${CONF_OVERLAY_FILE}"
+  source "$CONF_OVERLAY_FILE"
+fi
+
 _require_root() {
   [ "$(id -u)" -eq 0 ] && return
   command -v sudo > /dev/null 2>&1 || \
     _die "this command must be run as root"
-  exec sudo -- "$0" "${ORIG_ARGV[@]}"
+  if [ -n "$CONF_OVERLAY_FILE" ]; then
+    exec sudo BTRCTL_CONF="$CONF_OVERLAY_FILE" -- "$0" "${ORIG_ARGV[@]}"
+  else
+    exec sudo -- "$0" "${ORIG_ARGV[@]}"
+  fi
 }
 
 _confirm() {
@@ -855,6 +865,8 @@ cmd_trunk_rm() {
 }
 
 cmd_config() {
+  echo "CONF_FILE=${CONF_FILE}"
+  echo "CONF_OVERLAY_FILE=${CONF_OVERLAY_FILE}"
   echo "HOST_LABEL=${HOST_LABEL}"
   echo "BTRFS_MOUNT_POINT=${BTRFS_MOUNT_POINT}"
   echo "SUBVOLUMES=(${SUBVOLUMES[*]})"
@@ -879,6 +891,17 @@ ${c_bold}btrctl${c_reset} - Btrfs snapshot and trunk backup tool
 
 ${c_bold}USAGE:${c_reset}
   ${c_bold}btrctl${c_reset} <command> [options]
+
+${c_bold}ENVIRONMENT:${c_reset}
+  ${c_bold}BTRCTL_CONF${c_reset}=${c_var}FILE${c_reset}
+      Overlay config file, sourced after /etc/btrctl.conf. Values set in
+      FILE override the base config; anything not set in FILE is
+      inherited from /etc/btrctl.conf. Useful for a second, independent
+      btrfs pool on the same host (its own HOST_LABEL/BTRFS_MOUNT_POINT/
+      SUBVOLUMES) while still sharing TRUNK_*/SSH_USER settings from the
+      base config. If set and FILE does not exist, this is a hard error.
+      Preserved automatically across the automatic sudo elevation that
+      happens when btrctl isn't already running as root.
 
 ${c_bold}COMMANDS:${c_reset}
   ${c_bold}mount${c_reset} [--host ${c_var}HOST${c_reset}]

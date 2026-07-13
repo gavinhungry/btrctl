@@ -8,6 +8,17 @@ btrctl - Btrfs snapshot and trunk backup tool
 USAGE:
   btrctl <command> [options]
 
+ENVIRONMENT:
+  BTRCTL_CONF=FILE
+      Overlay config file, sourced after /etc/btrctl.conf. Values set in
+      FILE override the base config; anything not set in FILE is
+      inherited from /etc/btrctl.conf. Useful for a second, independent
+      btrfs pool on the same host (its own HOST_LABEL/BTRFS_MOUNT_POINT/
+      SUBVOLUMES) while still sharing TRUNK_*/SSH_USER settings from the
+      base config. If set and FILE does not exist, this is a hard error.
+      Preserved automatically across the automatic sudo elevation that
+      happens when btrctl isn't already running as root.
+
 COMMANDS:
   mount [--host HOST]
       Mount $BTRFS_MOUNT_POINT. Says so and exits if already mounted.
