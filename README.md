@@ -79,7 +79,7 @@ COMMANDS:
 
   trunk id
       Print the currently mounted trunk device's short identifier (the
-      $TRUNK_MOUNT_POINT/.id marker file content used in trunk_<id>
+      $TRUNK_MOUNT_POINT/.trunk-id marker file content used in trunk_<id>
       tracking symlinks), e.g. "a".
 
   trunk backup [--host HOST]

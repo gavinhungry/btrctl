@@ -638,9 +638,9 @@ _ensure_trunk_host_subvol() {
   fi
 }
 _trunk_id() {
-  local trunk_id_file="${TRUNK_MOUNT_POINT}/.id"
+  local trunk_id_file="${TRUNK_MOUNT_POINT}/.trunk-id"
   [ -f "$trunk_id_file" ] || \
-    _die "missing ${trunk_id_file}; trunk drive must have an .id marker file"
+    _die "missing ${trunk_id_file}; trunk drive must have a .trunk-id marker file"
   local trunk_id
   trunk_id=$(cat "$trunk_id_file")
   [ -n "$trunk_id" ] || _die "${trunk_id_file} is empty"
@@ -963,7 +963,7 @@ ${c_bold}COMMANDS:${c_reset}
 
   ${c_bold}trunk id${c_reset}
       Print the currently mounted trunk device's short identifier (the
-      \$TRUNK_MOUNT_POINT/.id marker file content used in trunk_<id>
+      \$TRUNK_MOUNT_POINT/.trunk-id marker file content used in trunk_<id>
       tracking symlinks), e.g. "a".
 
   ${c_bold}trunk backup${c_reset} [--host ${c_var}HOST${c_reset}]
