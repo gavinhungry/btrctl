@@ -76,12 +76,11 @@ COMMANDS:
 
         --host HOST         Run against HOST instead of the local machine
 
-  trunk mount
+  trunk open
       Unlock (LUKS) and mount the trunk backup device at $TRUNK_MOUNT_POINT.
       Each step is skipped (with a message) if already done.
 
-  trunk umount
-  trunk unmount
+  trunk close
       Unmount $TRUNK_MOUNT_POINT and close the LUKS device. The unmount
       step is skipped (with a message) if already unmounted, but the LUKS
       device is always closed regardless.

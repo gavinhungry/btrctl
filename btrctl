@@ -555,7 +555,7 @@ cmd_tag() {
   fi
 }
 
-cmd_trunk_mount() {
+cmd_trunk_open() {
   _require_root
   _require_trunk_uuid
 
@@ -588,7 +588,7 @@ cmd_trunk_mount() {
   _info "Trunk mounted at ${TRUNK_MOUNT_POINT}"
 }
 
-cmd_trunk_umount() {
+cmd_trunk_close() {
   _require_root
 
   if mountpoint -q "$TRUNK_MOUNT_POINT"; then
@@ -942,8 +942,8 @@ ${c_bold}COMMANDS:${c_reset}
   ${c_bold}rm${c_reset} ${c_var}SET_NAME${c_reset} [--host ${c_var}HOST${c_reset}]
   ${c_bold}tag${c_reset} ${c_var}SET_ID${c_reset} ${c_var}TAG_NAME${c_reset} [--host ${c_var}HOST${c_reset}]
 
-  ${c_bold}trunk mount${c_reset}
-  ${c_bold}trunk umount|unmount${c_reset}
+  ${c_bold}trunk open${c_reset}
+  ${c_bold}trunk close${c_reset}
   ${c_bold}trunk id${c_reset}
   ${c_bold}trunk backup${c_reset} [${c_var}SET_NAME${c_reset}] [--host ${c_var}HOST${c_reset}]
   ${c_bold}trunk list${c_reset} [${c_var}HOST${c_reset}]
@@ -977,8 +977,8 @@ main() {
       shift
       local sub="${1:-}"
       case "$sub" in
-        mount)          shift; cmd_trunk_mount "$@"  ;;
-        umount|unmount) shift; cmd_trunk_umount "$@" ;;
+        open)           shift; cmd_trunk_open "$@"   ;;
+        close)          shift; cmd_trunk_close "$@"  ;;
         id)             shift; cmd_trunk_id "$@"     ;;
         backup)         shift; cmd_trunk_backup "$@" ;;
         list)           shift; cmd_trunk_list "$@"   ;;
