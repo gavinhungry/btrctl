@@ -43,6 +43,10 @@ COMMANDS:
       the set must be cleaned up manually.
       post-snapshot receives SNAPSHOT_DIR, the absolute path to the completed
       snapshot set. pre-snapshot does not receive SNAPSHOT_DIR.
+      Set metadata and post-snapshot sidecars belong in SNAPSHOT_DIR/.btrctl.
+      trunk backup copies this directory recursively, accepting only regular
+      files and directories. On trunk, files are owned by the backup process,
+      have mode 0644, and receive new timestamps; directories have mode 0755.
 
         --tag NAME          Attach a human-readable tag to this snapshot set
         --host HOST         Run against HOST instead of the local machine
@@ -96,6 +100,8 @@ COMMANDS:
       btrctl-managed subvolumes from other, unrelated subvolumes that may
       also live on trunk). To adopt a pre-existing subvolume, manually
       create an empty .btrctl file inside it.
+      Snapshot-set metadata under .btrctl is copied after subvolume receive.
+      A trunk backup fails if the destination snapshot set already exists.
 
         --host HOST         Back up HOST's latest snapshot set instead of
                               the local machine's
@@ -112,6 +118,7 @@ COMMANDS:
       there is no implicit "local machine" default for this destructive
       operation. Prompts for confirmation before deleting. Aborts with an
       error if /trunk/@HOST exists but is missing its .btrctl marker.
+      Removes the entire set directory, including its .btrctl metadata.
 
   config
       Print effective configuration as KEY=value pairs.

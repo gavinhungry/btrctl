@@ -160,15 +160,16 @@ _is_set_name() {
 }
 
 _read_tag() {
-  [ -f "${1}/tag" ] && cat "${1}/tag" || true
+  [ -f "${1}/.btrctl/tag" ] && cat "${1}/.btrctl/tag" || true
 }
 
 _write_tag() {
   local dir="$1" value="$2"
   if [ -n "$value" ]; then
-    printf '%s\n' "$value" > "${dir}/tag"
+    mkdir -p "${dir}/.btrctl"
+    printf '%s\n' "$value" > "${dir}/.btrctl/tag"
   else
-    rm -f "${dir}/tag"
+    rm -f "${dir}/.btrctl/tag"
   fi
 }
 
@@ -644,6 +645,44 @@ _src_send_receive() {
   fi
 }
 
+_copy_set_metadata() {
+  local src_set_dir="$1" target_set_dir="$2"
+  local src_metadata_dir="${src_set_dir}/.btrctl" target_metadata_dir="${target_set_dir}/.btrctl"
+  local invalid_path metadata_state
+
+  metadata_state=$(_src_run "if test -e '${src_metadata_dir}' || test -L '${src_metadata_dir}'; then printf present; else printf absent; fi") || {
+    _error "failed to inspect snapshot metadata: ${src_metadata_dir}"
+    return 1
+  }
+  [ "$metadata_state" = absent ] && return 0
+  if [ "$metadata_state" != present ]; then
+    _error "could not determine snapshot metadata state: ${src_metadata_dir}"
+    return 1
+  fi
+  if ! _src_run "test -d '${src_metadata_dir}' && test ! -L '${src_metadata_dir}'"; then
+    _error "snapshot metadata is not a directory: ${src_metadata_dir}"
+    return 1
+  fi
+
+  invalid_path=$(_src_run "find '${src_metadata_dir}' -xdev \\( -type l -o \\( ! -type d -a ! -type f \\) \\) -print -quit") || {
+    _error "failed to inspect snapshot metadata: ${src_metadata_dir}"
+    return 1
+  }
+  if [ -n "$invalid_path" ]; then
+    _error "snapshot metadata contains an unsupported file type: ${invalid_path}"
+    return 1
+  fi
+
+  if ! _src_run "tar --one-file-system --hard-dereference -C '${src_set_dir}' -cf - .btrctl" \
+    | tar --no-same-owner --no-same-permissions --touch -C "$target_set_dir" -xf -; then
+    _error "failed to copy snapshot metadata from ${src_metadata_dir}"
+    return 1
+  fi
+
+  find "$target_metadata_dir" -type d -exec chmod 755 {} +
+  find "$target_metadata_dir" -type f -exec chmod 644 {} +
+}
+
 _trunk_backup() {
   local trunk_id="$1" host="${2:-}"
   local label snapshots_dir subvols
@@ -704,7 +743,10 @@ _trunk_backup() {
   _ensure_trunk_host_subvol "$target_host_dir"
 
   local target_set_dir="${target_host_dir}/${set_timestamp}"
-  mkdir -p "$target_set_dir"
+  if [ -e "$target_set_dir" ] || [ -L "$target_set_dir" ]; then
+    _die "trunk snapshot set already exists: ${target_set_dir}"
+  fi
+  mkdir "$target_set_dir"
 
   local subvol current_path parent_path send_cmd kind
   for subvol in "${subvols[@]}"; do
@@ -743,14 +785,8 @@ _trunk_backup() {
     fi
   done
 
-  local sidecar src_set_dir="${snapshots_dir}/${set_timestamp}" tmp
-  for sidecar in tag; do
-    _src_run "test -f '${src_set_dir}/${sidecar}'" || continue
-    tmp=$(mktemp)
-    _src_run "cat '${src_set_dir}/${sidecar}'" > "$tmp"
-    install -m 644 "$tmp" "${target_set_dir}/${sidecar}"
-    rm -f "$tmp"
-  done
+  local src_set_dir="${snapshots_dir}/${set_timestamp}"
+  _copy_set_metadata "$src_set_dir" "$target_set_dir" || return 1
 
   if [ -n "$host" ]; then
     _info "setting trunk_${trunk_id} -> ${set_timestamp} on ${host}"
