@@ -141,12 +141,12 @@ _run_snapshot_hook() {
 _ensure_trunk_mounted() {
   _require_root
   mountpoint -q "$TRUNK_MOUNT_POINT" || \
-    _die "${TRUNK_MOUNT_POINT} is not mounted; run 'btrctl trunk mount' first"
+    _die "${TRUNK_MOUNT_POINT} is not mounted"
 }
 
 _require_trunk_uuid() {
   [ -n "$TRUNK_LUKS_UUID" ] || \
-    _die "TRUNK_LUKS_UUID is not set in ${CONF_FILE}; required for trunk commands"
+    _die "TRUNK_LUKS_UUID is not set in ${CONF_FILE}"
 }
 
 _snapshot_subvol_path() {
