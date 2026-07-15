@@ -34,9 +34,13 @@ COMMANDS:
   snapshot [--tag NAME] [--host HOST]
       Take a snapshot set of all configured subvolumes under $BTRFS_MOUNT_POINT.
       Mounts $BTRFS_MOUNT_POINT automatically if not already mounted.
-      If $BTRFS_MOUNT_POINT/btrctl-pre-snapshot exists and is executable,
+      If $BTRFS_MOUNT_POINT/.btrctl/pre-snapshot exists and is executable,
       it is run (cwd = $BTRFS_MOUNT_POINT) before snapshotting begins; a
       non-zero exit aborts the snapshot before any subvolumes are touched.
+      If $BTRFS_MOUNT_POINT/.btrctl/post-snapshot exists and is executable,
+      it is run after the snapshot set and latest link are created. A
+      non-zero exit marks the set invalid; btrctl exits with an error and
+      the set must be cleaned up manually.
 
         --tag NAME          Attach a human-readable tag to this snapshot set
         --host HOST         Run against HOST instead of the local machine

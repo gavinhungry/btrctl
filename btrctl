@@ -119,8 +119,8 @@ _ensure_btrfs_mounted() {
   mountpoint -q "$BTRFS_MOUNT_POINT" || _mount_point "$BTRFS_MOUNT_POINT"
 }
 
-_run_pre_snapshot_script() {
-  local script="${BTRFS_MOUNT_POINT}/btrctl-pre-snapshot"
+_run_snapshot_hook() {
+  local hook="$1" script="${BTRFS_MOUNT_POINT}/.btrctl/${hook}"
   [ -e "$script" ] || return 0
 
   if [ ! -x "$script" ]; then
@@ -128,9 +128,8 @@ _run_pre_snapshot_script() {
     return 0
   fi
 
-  _info "Running pre-snapshot script (${script}) ..."
-  (cd "$BTRFS_MOUNT_POINT" && "$script") || \
-    _die "pre-snapshot script failed (${script}); aborting snapshot"
+  _info "Running ${hook} hook (${script}) ..."
+  (cd "$BTRFS_MOUNT_POINT" && "$script")
 }
 
 _ensure_trunk_mounted() {
@@ -345,7 +344,8 @@ cmd_snapshot() {
 
   _maybe_dispatch_remote "$host" snapshot --tag "$tag" && return
   _ensure_btrfs_mounted
-  _run_pre_snapshot_script
+  _run_snapshot_hook pre-snapshot || \
+    _die "pre-snapshot hook failed; aborting snapshot"
 
   local snapshots_subvol="@snapshots"
   local now
@@ -370,6 +370,8 @@ cmd_snapshot() {
   _write_tag "$snapshot_dir" "$tag"
   _info "Setting latest -> ${now}"
   _update_symlink "$now" "${BTRFS_MOUNT_POINT}/${snapshots_subvol}/latest" || true
+  _run_snapshot_hook post-snapshot || \
+    _die "post-snapshot hook failed"
   _info "Created snapshot set: ${now}${tag:+ (tag: ${tag})}"
 }
 
