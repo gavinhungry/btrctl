@@ -636,9 +636,24 @@ cmd_trunk_id() {
 }
 
 cmd_trunk_backup() {
-  local host
-
-  _parse_host_only_args "trunk backup" host "$@"
+  local host="" set_name=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --host)
+        _consume_opt_value host "$@"
+        shift 2
+        ;;
+      -*)
+        _die "trunk backup: unknown option: $1"
+        ;;
+      *)
+        [ -z "$set_name" ] || _die "trunk backup: unexpected extra argument: $1"
+        _is_set_name "$1" || _die "trunk backup: invalid SET_NAME: $1"
+        set_name="$1"
+        shift
+        ;;
+    esac
+  done
   _require_root
   _require_trunk_uuid
   _ensure_trunk_mounted
@@ -646,7 +661,7 @@ cmd_trunk_backup() {
   local trunk_id
   trunk_id=$(_trunk_id)
 
-  _trunk_backup "$trunk_id" "$host"
+  _trunk_backup "$trunk_id" "$host" "$set_name"
 }
 
 _src_run() {
@@ -704,7 +719,7 @@ _copy_set_metadata() {
 }
 
 _trunk_backup() {
-  local trunk_id="$1" host="${2:-}"
+  local trunk_id="$1" host="${2:-}" set_name="${3:-}"
   local label snapshots_dir subvols
 
   SRC_HOST=""
@@ -728,25 +743,38 @@ _trunk_backup() {
     subvols=("${SUBVOLUMES[@]}")
   fi
 
-  local latest_link="${snapshots_dir}/latest"
   local parent_link="${snapshots_dir}/trunk_${trunk_id}"
-  local err_no_latest err_latest_dangling err_parent_dangling
+  local err_parent_dangling
   if [ -n "$host" ]; then
-    err_no_latest="no latest snapshot set found on ${host}"
-    err_latest_dangling="latest snapshot symlink on ${host} is dangling"
     err_parent_dangling="trunk_${trunk_id} tracking symlink on ${host} is dangling"
   else
-    err_no_latest="no ${latest_link} symlink found"
-    err_latest_dangling="${latest_link} is dangling"
     err_parent_dangling="${parent_link} is dangling"
   fi
 
-  local resolved_latest
-  resolved_latest=$(_src_run "readlink -f '${latest_link}'" 2>/dev/null || true)
-  [ -n "$resolved_latest" ] || _die "$err_no_latest"
-  _src_run "test -d '${resolved_latest}'" || _die "$err_latest_dangling"
   local set_timestamp
-  set_timestamp=$(basename "$resolved_latest")
+  if [ -n "$set_name" ]; then
+    set_timestamp="$set_name"
+    if ! _src_run "test -d '${snapshots_dir}/${set_timestamp}'"; then
+      if [ -n "$host" ]; then
+        _die "snapshot set not found on ${host}: ${set_timestamp}"
+      else
+        _die "no such snapshot set: ${snapshots_dir}/${set_timestamp}"
+      fi
+    fi
+  else
+    local latest_link="${snapshots_dir}/latest" resolved_latest err_no_latest err_latest_dangling
+    if [ -n "$host" ]; then
+      err_no_latest="no latest snapshot set found on ${host}"
+      err_latest_dangling="latest snapshot symlink on ${host} is dangling"
+    else
+      err_no_latest="no ${latest_link} symlink found"
+      err_latest_dangling="${latest_link} is dangling"
+    fi
+    resolved_latest=$(_src_run "readlink -f '${latest_link}'" 2>/dev/null || true)
+    [ -n "$resolved_latest" ] || _die "$err_no_latest"
+    _src_run "test -d '${resolved_latest}'" || _die "$err_latest_dangling"
+    set_timestamp=$(basename "$resolved_latest")
+  fi
 
   local parent_timestamp=""
   if _src_run "test -e '${parent_link}' || test -L '${parent_link}'"; then
@@ -780,7 +808,8 @@ _trunk_backup() {
     fi
 
     parent_path=""
-    if [ -n "$parent_timestamp" ]; then
+    # A newer tracking target cannot be an incremental parent for an older selected set.
+    if [ -n "$parent_timestamp" ] && [[ "$parent_timestamp" < "$set_timestamp" ]]; then
       local candidate
       candidate=$(_snapshot_subvol_path "${snapshots_dir}/${parent_timestamp}" "$parent_timestamp" "$label" "$subvol")
       _src_run "test -e '${candidate}'" && parent_path="$candidate"
@@ -916,7 +945,7 @@ ${c_bold}COMMANDS:${c_reset}
   ${c_bold}trunk mount${c_reset}
   ${c_bold}trunk umount|unmount${c_reset}
   ${c_bold}trunk id${c_reset}
-  ${c_bold}trunk backup${c_reset} [--host ${c_var}HOST${c_reset}]
+  ${c_bold}trunk backup${c_reset} [${c_var}SET_NAME${c_reset}] [--host ${c_var}HOST${c_reset}]
   ${c_bold}trunk list${c_reset} [${c_var}HOST${c_reset}]
   ${c_bold}trunk rm${c_reset} ${c_var}HOST${c_reset}/${c_var}SET_NAME${c_reset}
 

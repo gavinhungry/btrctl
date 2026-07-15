@@ -91,8 +91,9 @@ COMMANDS:
       $TRUNK_MOUNT_POINT/.trunk-id marker file content used in trunk_<id>
       tracking symlinks), e.g. "a".
 
-  trunk backup [--host HOST]
-      Back up the latest snapshot set to the currently mounted trunk device.
+  trunk backup [SET_NAME] [--host HOST]
+      Back up SET_NAME, or the latest snapshot set when omitted, to the
+      currently mounted trunk device.
       Always runs on the machine trunk is physically attached to.
       If /trunk/@<HOST_LABEL> does not exist, it is created automatically
       as a new subvolume, along with a /trunk/@<HOST_LABEL>/.btrctl marker
@@ -104,7 +105,7 @@ COMMANDS:
       Snapshot-set metadata under .btrctl is copied after subvolume receive.
       A trunk backup fails if the destination snapshot set already exists.
 
-        --host HOST         Back up HOST's latest snapshot set instead of
+        --host HOST         Back up HOST's selected snapshot set instead of
                               the local machine's
 
   trunk list [HOST]
