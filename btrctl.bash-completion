@@ -1,5 +1,5 @@
 _btrctl() {
-  local cur word i
+  local cur word i first_arg
   cur="${COMP_WORDS[COMP_CWORD]}"
 
   local commands="mount umount unmount snapshot list latest rm tag trunk config help version -h --help -v --version"
@@ -18,15 +18,21 @@ _btrctl() {
   fi
 
   if [ "${COMP_WORDS[1]}" = "rm" ]; then
-    for ((i = 2; i < COMP_CWORD; i++)); do
-      word="${COMP_WORDS[i]}"
-      [ "$word" = "--host" ] && return
-      [[ "$word" != -* ]] && return
-    done
-
-    [[ "$cur" = -* ]] && return
-    COMPREPLY=($(compgen -W "$(command btrctl list 2>/dev/null | awk 'NR > 1 { print $2 }')" -- "$cur"))
+    first_arg=2
+  elif [ "${COMP_WORDS[1]}" = "trunk" ] && [ "${COMP_WORDS[2]}" = "backup" ]; then
+    first_arg=3
+  else
+    return
   fi
+
+  for ((i = first_arg; i < COMP_CWORD; i++)); do
+    word="${COMP_WORDS[i]}"
+    [ "$word" = "--host" ] && return
+    [[ "$word" != -* ]] && return
+  done
+
+  [[ "$cur" = -* ]] && return
+  COMPREPLY=($(compgen -W "$(command btrctl list 2>/dev/null | awk 'NR > 1 { print $2 }')" -- "$cur"))
 }
 
 complete -F _btrctl btrctl
