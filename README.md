@@ -41,6 +41,8 @@ COMMANDS:
       it is run after the snapshot set and latest link are created. A
       non-zero exit marks the set invalid; btrctl exits with an error and
       the set must be cleaned up manually.
+      post-snapshot receives SNAPSHOT_DIR, the absolute path to the completed
+      snapshot set. pre-snapshot does not receive SNAPSHOT_DIR.
 
         --tag NAME          Attach a human-readable tag to this snapshot set
         --host HOST         Run against HOST instead of the local machine

@@ -120,7 +120,7 @@ _ensure_btrfs_mounted() {
 }
 
 _run_snapshot_hook() {
-  local hook="$1" script="${BTRFS_MOUNT_POINT}/.btrctl/${hook}"
+  local hook="$1" snapshot_dir="${2:-}" script="${BTRFS_MOUNT_POINT}/.btrctl/${hook}"
   [ -e "$script" ] || return 0
 
   if [ ! -x "$script" ]; then
@@ -128,8 +128,12 @@ _run_snapshot_hook() {
     return 0
   fi
 
-  _info "Running ${hook} hook (${script}) ..."
-  (cd "$BTRFS_MOUNT_POINT" && "$script")
+  _info "Running ${hook} hook ..."
+  if [ -n "$snapshot_dir" ]; then
+    (cd "$BTRFS_MOUNT_POINT" && SNAPSHOT_DIR="$snapshot_dir" "$script")
+  else
+    (cd "$BTRFS_MOUNT_POINT" && "$script")
+  fi
 }
 
 _ensure_trunk_mounted() {
@@ -350,7 +354,8 @@ cmd_snapshot() {
   local snapshots_subvol="@snapshots"
   local now
   now=$(date +'%Y-%m-%d-%H%M%S')
-  local snapshot_dir="${BTRFS_MOUNT_POINT}/${snapshots_subvol}/${now}"
+  local snapshot_dir
+  snapshot_dir="$(cd "$BTRFS_MOUNT_POINT" && pwd -P)/${snapshots_subvol}/${now}"
 
   mkdir -p "$snapshot_dir"
 
@@ -370,7 +375,7 @@ cmd_snapshot() {
   _write_tag "$snapshot_dir" "$tag"
   _info "Setting latest -> ${now}"
   _update_symlink "$now" "${BTRFS_MOUNT_POINT}/${snapshots_subvol}/latest" || true
-  _run_snapshot_hook post-snapshot || \
+  _run_snapshot_hook post-snapshot "$snapshot_dir" || \
     _die "post-snapshot hook failed"
   _info "Created snapshot set: ${now}${tag:+ (tag: ${tag})}"
 }
