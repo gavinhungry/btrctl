@@ -53,7 +53,7 @@ COMMANDS:
         --host HOST         Run against HOST instead of the local machine
 
   list [--host HOST]
-      List local snapshot sets: timestamp, tag if present, and FLAGS
+      List local snapshot sets: host label, timestamp, tag if present, and FLAGS
       ("latest" and/or any trunk_<id> this set was last backed up to).
 
         --host HOST         Run against HOST instead of the local machine

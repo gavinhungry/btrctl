@@ -416,7 +416,10 @@ cmd_list() {
     fi
   done
 
-  printf '%s%-20s  %-15s  %s%s\n' "$OUT_BOLD" "SET" "TAG" "FLAGS" "$OUT_RESET"
+  local -a set_names=() tags=() flags_list=()
+  local host_width=${#HOST_LABEL} set_width=3 tag_width=3 flags_width=5
+  [ "$host_width" -ge 4 ] || host_width=4
+
   local found=0 d set_name tag flags
   for d in "$snapshots_dir"/*/; do
     set_name=$(basename "$d")
@@ -430,8 +433,23 @@ cmd_list() {
         flags="latest"
       fi
     fi
-    printf '%-20s  %-15s  %s\n' "$set_name" "$tag" "$flags"
+    set_names+=("$set_name")
+    tags+=("$tag")
+    flags_list+=("$flags")
+    [ "${#set_name}" -le "$set_width" ] || set_width=${#set_name}
+    [ "${#tag}" -le "$tag_width" ] || tag_width=${#tag}
+    [ "${#flags}" -le "$flags_width" ] || flags_width=${#flags}
     found=1
+  done
+
+  printf '%s%-*s    %-*s    %-*s    %-*s%s\n' \
+    "$OUT_BOLD" "$host_width" "HOST" "$set_width" "SET" \
+    "$tag_width" "TAG" "$flags_width" "FLAGS" "$OUT_RESET"
+  local i
+  for i in "${!set_names[@]}"; do
+    printf '%-*s    %-*s    %-*s    %-*s\n' \
+      "$host_width" "$HOST_LABEL" "$set_width" "${set_names[i]}" \
+      "$tag_width" "${tags[i]}" "$flags_width" "${flags_list[i]}"
   done
   [ "$found" -eq 1 ] || _info "No snapshot sets found."
 }
