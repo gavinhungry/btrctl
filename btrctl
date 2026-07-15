@@ -869,13 +869,17 @@ cmd_trunk_list() {
 
   _require_btrctl_marker "$host_dir"
 
-  printf '%s%-20s  %s%s\n' "$OUT_BOLD" "SET" "TAG" "$OUT_RESET"
+  local trunk_host="trunk/${label}"
+  local host_width=${#trunk_host}
+  [ "$host_width" -ge 4 ] || host_width=4
+  printf '%s%-*s  %-20s  %s%s\n' \
+    "$OUT_BOLD" "$host_width" "HOST" "SET" "TAG" "$OUT_RESET"
   local found=0 d set_name tag
   for d in "$host_dir"/*/; do
     set_name=$(basename "$d")
     _is_set_name "$set_name" || continue
     tag=$(_read_tag "${d%/}")
-    printf '%-20s  %s\n' "$set_name" "$tag"
+    printf '%-*s  %-20s  %s\n' "$host_width" "$trunk_host" "$set_name" "$tag"
     found=1
   done
   [ "$found" -eq 1 ] || _info "No snapshot sets found for host '${label}'."
