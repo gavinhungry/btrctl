@@ -132,9 +132,9 @@ _run_snapshot_hook() {
 
   _info "Running ${hook} hook ..."
   if [ -n "$snapshot_dir" ]; then
-    (cd "$BTRFS_MOUNT_POINT" && SNAPSHOT_DIR="$snapshot_dir" "$script")
+    (cd "$BTRFS_MOUNT_POINT" && BTRFS_MOUNT_POINT="$BTRFS_MOUNT_POINT" SNAPSHOT_DIR="$snapshot_dir" "$script")
   else
-    (cd "$BTRFS_MOUNT_POINT" && "$script")
+    (cd "$BTRFS_MOUNT_POINT" && BTRFS_MOUNT_POINT="$BTRFS_MOUNT_POINT" "$script")
   fi
 }
 

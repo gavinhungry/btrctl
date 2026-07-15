@@ -41,8 +41,9 @@ COMMANDS:
       it is run after the snapshot set and latest link are created. A
       non-zero exit marks the set invalid; btrctl exits with an error and
       the set must be cleaned up manually.
-      post-snapshot receives SNAPSHOT_DIR, the absolute path to the completed
-      snapshot set. pre-snapshot does not receive SNAPSHOT_DIR.
+      Both hooks receive BTRFS_MOUNT_POINT and run with it as their cwd.
+      post-snapshot also receives SNAPSHOT_DIR, the absolute path to the
+      completed snapshot set. pre-snapshot does not receive SNAPSHOT_DIR.
       Set metadata and post-snapshot sidecars belong in SNAPSHOT_DIR/.btrctl.
       trunk backup copies this directory recursively, accepting only regular
       files and directories. On trunk, files are owned by the backup process,
