@@ -192,13 +192,6 @@ _delete_set_dir() {
   rm -rf "$set_dir"
 }
 
-_immutables() {
-  { find "${@:-.}" -exec lsattr {} + 2>/dev/null || true; } \
-    | { grep '^[^ ]*i' || true; } \
-    | cut -d' ' -f2- \
-    | sort -u
-}
-
 _require_ssh_user() {
   [ -n "$SSH_USER" ] || \
     _die "SSH_USER is not set and \$SUDO_USER is not available; set SSH_USER in config or invoke via sudo"
@@ -373,15 +366,6 @@ cmd_snapshot() {
       fi
     done
   ) || exit 1
-
-  _info "Locating immutables ..."
-  (
-    cd "$snapshot_dir"
-    for subvol in "${SUBVOLUMES[@]}"; do
-      snapshot_name="@snapshot-${now}-${HOST_LABEL}-${subvol}"
-      _immutables "$snapshot_name"
-    done
-  ) > "${snapshot_dir}/immutables"
 
   _write_tag "$snapshot_dir" "$tag"
   _info "Setting latest -> ${now}"
@@ -753,7 +737,7 @@ _trunk_backup() {
   done
 
   local sidecar src_set_dir="${snapshots_dir}/${set_timestamp}" tmp
-  for sidecar in tag immutables; do
+  for sidecar in tag; do
     _src_run "test -f '${src_set_dir}/${sidecar}'" || continue
     tmp=$(mktemp)
     _src_run "cat '${src_set_dir}/${sidecar}'" > "$tmp"

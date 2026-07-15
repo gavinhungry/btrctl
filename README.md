@@ -37,8 +37,6 @@ COMMANDS:
       If $BTRFS_MOUNT_POINT/btrctl-pre-snapshot exists and is executable,
       it is run (cwd = $BTRFS_MOUNT_POINT) before snapshotting begins; a
       non-zero exit aborts the snapshot before any subvolumes are touched.
-      Records immutable-flagged files/dirs for each snapshot (lost on
-      send/receive otherwise).
 
         --tag NAME          Attach a human-readable tag to this snapshot set
         --host HOST         Run against HOST instead of the local machine
