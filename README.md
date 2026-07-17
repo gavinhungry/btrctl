@@ -119,3 +119,7 @@ COMMANDS:
   help, -h, --help
       Show this help text.
 ```
+
+License
+-------
+This software is released under the terms of the **MIT license**. See `LICENSE`.
