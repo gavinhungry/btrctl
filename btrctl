@@ -590,7 +590,6 @@ cmd_trunk_backup() {
     esac
   done
   _require_root
-  _require_trunk_uuid
   _ensure_trunk_mounted
 
   local trunk_id
