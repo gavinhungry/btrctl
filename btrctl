@@ -12,7 +12,8 @@ HOST_LABEL=$(hostname)
 BTRFS_MOUNT_POINT=/btrfs
 SUBVOLUMES=(@)
 TRUNK_MOUNT_POINT=/trunk
-SSH_USER=${SUDO_USER:-$USER}
+
+SSH="${SUDO_USER:+sudo -u "$SUDO_USER"} /usr/bin/ssh"
 
 if [ -f "$CONF_FILE" ]; then
   source "$CONF_FILE"
@@ -187,12 +188,6 @@ _delete_set_dir() {
   rm -rf "$set_dir"
 }
 
-_require_ssh_user() {
-  if [ -n "$SSH_USER" ]; then
-    _die "SSH_USER is not set and \$SUDO_USER is not available; set SSH_USER in config or invoke via sudo"
-  fi
-}
-
 _remote_sudo_prompt() {
   local host="$1" m='' r=''
   if [ -z "${NO_COLOR:-}" ]; then
@@ -204,14 +199,12 @@ _remote_sudo_prompt() {
 
 _ssh() {
   local host="$1"; shift
-  _require_ssh_user
-  sudo -H -u "$SSH_USER" ssh -l "$SSH_USER" "$host" "$@"
+  $SSH "$host" "$@"
 }
 
 _ssh_tty() {
   local host="$1"; shift
-  _require_ssh_user
-  sudo -H -u "$SSH_USER" ssh -t -l "$SSH_USER" "$host" "$@"
+  $SSH -t "$host" "$@"
 }
 
 _dispatch_remote() {
@@ -858,7 +851,6 @@ cmd_config() {
   echo "BTRFS_MOUNT_POINT=${BTRFS_MOUNT_POINT}"
   echo "SUBVOLUMES=(${SUBVOLUMES[*]})"
   echo "TRUNK_MOUNT_POINT=${TRUNK_MOUNT_POINT}"
-  echo "SSH_USER=${SSH_USER}"
 }
 
 cmd_help() {

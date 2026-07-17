@@ -10,14 +10,13 @@ USAGE:
 
 ENVIRONMENT:
   BTRCTL_CONF=FILE
-      Overlay config file, sourced after /etc/btrctl.conf. Values set in
-      FILE override the base config; anything not set in FILE is
-      inherited from /etc/btrctl.conf. Useful for a second, independent
-      btrfs pool on the same host (its own HOST_LABEL/BTRFS_MOUNT_POINT/
-      SUBVOLUMES) while still sharing TRUNK_*/SSH_USER settings from the
-      base config. If set and FILE does not exist, this is a hard error.
-      Preserved automatically across the automatic sudo elevation that
-      happens when btrctl isn't already running as root.
+      Overlay config file, sourced after /etc/btrctl.conf. Values set in FILE
+      override the base config; anything not set in FILE is inherited from
+      /etc/btrctl.conf. Useful for a second, independent btrfs pool on the same
+      host (its own HOST_LABEL/BTRFS_MOUNT_POINT/ SUBVOLUMES) while still
+      sharing TRUNK_* settings from the base config. If set and FILE does not
+      exist, this is a hard error. Preserved automatically across the automatic
+      sudo elevation that happens when btrctl isn't already running as root.
 
 COMMANDS:
   mount [--host HOST]
@@ -33,21 +32,22 @@ COMMANDS:
 
   snapshot [--tag NAME] [--host HOST]
       Take a snapshot set of all configured subvolumes under $BTRFS_MOUNT_POINT.
-      Mounts $BTRFS_MOUNT_POINT automatically if not already mounted.
-      If $BTRFS_MOUNT_POINT/.btrctl/pre-snapshot exists and is executable,
-      it is run (cwd = $BTRFS_MOUNT_POINT) before snapshotting begins; a
-      non-zero exit aborts the snapshot before any subvolumes are touched.
-      If $BTRFS_MOUNT_POINT/.btrctl/post-snapshot exists and is executable,
-      it is run after the snapshot set and latest link are created. A
-      non-zero exit marks the set invalid; btrctl exits with an error and
-      the set must be cleaned up manually.
+      Mounts $BTRFS_MOUNT_POINT automatically if not already mounted. If
+      $BTRFS_MOUNT_POINT/.btrctl/pre-snapshot exists and is executable, it is
+      run (cwd = $BTRFS_MOUNT_POINT) before snapshotting begins; a non-zero exit
+      aborts the snapshot before any subvolumes are touched. If
+      $BTRFS_MOUNT_POINT/.btrctl/post-snapshot exists and is executable, it is
+      run after the snapshot set and latest link are created. A non-zero exit
+      marks the set invalid; btrctl exits with an error and the set must be
+      cleaned up manually.
+
       Both hooks receive BTRFS_MOUNT_POINT and run with it as their cwd.
       post-snapshot also receives SNAPSHOT_DIR, the absolute path to the
-      completed snapshot set. pre-snapshot does not receive SNAPSHOT_DIR.
-      Set metadata and post-snapshot sidecars belong in SNAPSHOT_DIR/.btrctl.
-      trunk backup copies this directory recursively, accepting only regular
-      files and directories. On trunk, files are owned by the backup process,
-      have mode 0644, and receive new timestamps; directories have mode 0755.
+      completed snapshot set. pre-snapshot does not receive SNAPSHOT_DIR. Set
+      metadata and post-snapshot sidecars belong in SNAPSHOT_DIR/.btrctl. trunk
+      backup copies this directory recursively, accepting only regular files and
+      directories. On trunk, files are owned by the backup process, have mode
+      0644, and receive new timestamps; directories have mode 0755.
 
         --tag NAME          Attach a human-readable tag to this snapshot set
         --host HOST         Run against HOST instead of the local machine
