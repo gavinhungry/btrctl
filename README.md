@@ -76,23 +76,15 @@ COMMANDS:
 
         --host HOST         Run against HOST instead of the local machine
 
-  trunk open
-      Unlock (LUKS) and mount the trunk backup device at $TRUNK_MOUNT_POINT.
-      Each step is skipped (with a message) if already done.
-
-  trunk close
-      Unmount $TRUNK_MOUNT_POINT and close the LUKS device. The unmount
-      step is skipped (with a message) if already unmounted, but the LUKS
-      device is always closed regardless.
-
   trunk id
       Print the currently mounted trunk device's short identifier (the
-      $TRUNK_MOUNT_POINT/.trunk-id marker file content used in trunk_<id>
+      $TRUNK_MOUNT_POINT/.btrctl/trunk-id marker file content used in trunk_<id>
       tracking symlinks), e.g. "a".
 
   trunk backup [SET_NAME] [--host HOST]
       Back up SET_NAME, or the latest snapshot set when omitted, to the
-      currently mounted trunk device.
+      currently mounted trunk device. Device opening, closing, and mounting
+      are managed externally.
       Always runs on the machine trunk is physically attached to.
       If /trunk/@<HOST_LABEL> does not exist, it is created automatically
       as a new subvolume, along with a /trunk/@<HOST_LABEL>/.btrctl marker

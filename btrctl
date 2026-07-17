@@ -7,14 +7,10 @@ ORIG_ARGV=("$@")
 REMOTE_LABEL=""
 
 readonly CONF_FILE=/etc/btrctl.conf
-readonly TRUNK_LUKS_MAPPER_NAME=trunk
 
 HOST_LABEL=$(hostname)
 BTRFS_MOUNT_POINT=/btrfs
 SUBVOLUMES=(@)
-TRUNK_LUKS_UUID=
-TRUNK_LUKS_KEYFILE=/etc/luks/trunk.key
-TRUNK_DISCARDS=1
 TRUNK_MOUNT_POINT=/trunk
 SSH_USER=${SUDO_USER:-$USER}
 
@@ -77,8 +73,7 @@ fi
 
 _require_root() {
   [ "$(id -u)" -eq 0 ] && return
-  command -v sudo > /dev/null 2>&1 || \
-    _die "this command must be run as root"
+  command -v sudo > /dev/null 2>&1 || _die "this command must be run as root"
   if [ -n "$CONF_OVERLAY_FILE" ]; then
     exec sudo BTRCTL_CONF="$CONF_OVERLAY_FILE" -- "$0" "${ORIG_ARGV[@]}"
   else
@@ -140,13 +135,7 @@ _run_snapshot_hook() {
 
 _ensure_trunk_mounted() {
   _require_root
-  mountpoint -q "$TRUNK_MOUNT_POINT" || \
-    _die "${TRUNK_MOUNT_POINT} is not mounted"
-}
-
-_require_trunk_uuid() {
-  [ -n "$TRUNK_LUKS_UUID" ] || \
-    _die "TRUNK_LUKS_UUID is not set in ${CONF_FILE}"
+  mountpoint -q "$TRUNK_MOUNT_POINT" || _die "${TRUNK_MOUNT_POINT} is not mounted"
 }
 
 _snapshot_subvol_path() {
@@ -199,8 +188,9 @@ _delete_set_dir() {
 }
 
 _require_ssh_user() {
-  [ -n "$SSH_USER" ] || \
+  if [ -n "$SSH_USER" ]; then
     _die "SSH_USER is not set and \$SUDO_USER is not available; set SSH_USER in config or invoke via sudo"
+  fi
 }
 
 _remote_sudo_prompt() {
@@ -242,8 +232,7 @@ _remote_root() {
 
 _remote_config() {
   local host="$1" raw line
-  raw=$(_ssh "$host" "btrctl config") || \
-    _die "failed to fetch remote config from ${host}"
+  raw=$(_ssh "$host" "btrctl config") || _die "failed to fetch remote config from ${host}"
 
   local subvolumes_line=""
   REMOTE_HOST_LABEL=""
@@ -555,52 +544,6 @@ cmd_tag() {
   fi
 }
 
-cmd_trunk_open() {
-  _require_root
-  _require_trunk_uuid
-
-  local mapper_dev="/dev/mapper/${TRUNK_LUKS_MAPPER_NAME}"
-  if [ -e "$mapper_dev" ]; then
-    _warn "LUKS mapping '${TRUNK_LUKS_MAPPER_NAME}' is already open (${mapper_dev})"
-  else
-    local by_uuid="/dev/disk/by-uuid/${TRUNK_LUKS_UUID}"
-    [ -e "$by_uuid" ] || \
-      _die "no block device found at ${by_uuid}"
-
-    local discard_flags=()
-    [ "$TRUNK_DISCARDS" = "0" ] || discard_flags=(--allow-discards)
-
-    _info "Opening trunk LUKS device ..."
-    if [ -f "$TRUNK_LUKS_KEYFILE" ]; then
-      cryptsetup luksOpen "$by_uuid" "$TRUNK_LUKS_MAPPER_NAME" \
-        --key-file "$TRUNK_LUKS_KEYFILE" "${discard_flags[@]}"
-    else
-      cryptsetup luksOpen "$by_uuid" "$TRUNK_LUKS_MAPPER_NAME" "${discard_flags[@]}"
-    fi
-  fi
-
-  if mountpoint -q "$TRUNK_MOUNT_POINT"; then
-    _warn "${TRUNK_MOUNT_POINT} is already mounted"
-    return
-  fi
-
-  _mount_point "$TRUNK_MOUNT_POINT"
-  _info "Trunk mounted at ${TRUNK_MOUNT_POINT}"
-}
-
-cmd_trunk_close() {
-  _require_root
-
-  if mountpoint -q "$TRUNK_MOUNT_POINT"; then
-    _umount_point "$TRUNK_MOUNT_POINT"
-  else
-    _warn "${TRUNK_MOUNT_POINT} is already unmounted"
-  fi
-
-  _info "Closing trunk LUKS device ..."
-  cryptsetup luksClose "$TRUNK_LUKS_MAPPER_NAME"
-  _info "Trunk unmounted and LUKS device closed"
-}
 _require_btrctl_marker() {
   local dir="$1"
   [ -f "${dir}/.btrctl" ] || \
@@ -620,9 +563,8 @@ _ensure_trunk_host_subvol() {
   fi
 }
 _trunk_id() {
-  local trunk_id_file="${TRUNK_MOUNT_POINT}/.trunk-id"
-  [ -f "$trunk_id_file" ] || \
-    _die "missing ${trunk_id_file}; trunk drive must have a .trunk-id marker file"
+  local trunk_id_file="${TRUNK_MOUNT_POINT}/.btrctl/trunk-id"
+  [ -f "$trunk_id_file" ] || _die "missing ${trunk_id_file}"
   local trunk_id
   trunk_id=$(cat "$trunk_id_file")
   [ -n "$trunk_id" ] || _die "${trunk_id_file} is empty"
@@ -915,9 +857,6 @@ cmd_config() {
   echo "HOST_LABEL=${HOST_LABEL}"
   echo "BTRFS_MOUNT_POINT=${BTRFS_MOUNT_POINT}"
   echo "SUBVOLUMES=(${SUBVOLUMES[*]})"
-  echo "TRUNK_LUKS_UUID=${TRUNK_LUKS_UUID}"
-  echo "TRUNK_LUKS_KEYFILE=${TRUNK_LUKS_KEYFILE}"
-  echo "TRUNK_DISCARDS=${TRUNK_DISCARDS}"
   echo "TRUNK_MOUNT_POINT=${TRUNK_MOUNT_POINT}"
   echo "SSH_USER=${SSH_USER}"
 }
@@ -946,8 +885,6 @@ ${c_bold}COMMANDS:${c_reset}
   ${c_bold}rm${c_reset} ${c_var}SET_NAME${c_reset} [--host ${c_var}HOST${c_reset}]
   ${c_bold}tag${c_reset} ${c_var}SET_ID${c_reset} ${c_var}TAG_NAME${c_reset} [--host ${c_var}HOST${c_reset}]
 
-  ${c_bold}trunk open${c_reset}
-  ${c_bold}trunk close${c_reset}
   ${c_bold}trunk id${c_reset}
   ${c_bold}trunk backup${c_reset} [${c_var}SET_NAME${c_reset}] [--host ${c_var}HOST${c_reset}]
   ${c_bold}trunk list${c_reset} [${c_var}HOST${c_reset}]
@@ -981,8 +918,6 @@ main() {
       shift
       local sub="${1:-}"
       case "$sub" in
-        open)           shift; cmd_trunk_open "$@"   ;;
-        close)          shift; cmd_trunk_close "$@"  ;;
         id)             shift; cmd_trunk_id "$@"     ;;
         backup)         shift; cmd_trunk_backup "$@" ;;
         list)           shift; cmd_trunk_list "$@"   ;;

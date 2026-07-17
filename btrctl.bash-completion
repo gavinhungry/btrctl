@@ -3,7 +3,7 @@ _btrctl() {
   cur="${COMP_WORDS[COMP_CWORD]}"
 
   local commands="mount umount unmount snapshot list latest rm tag trunk config help version -h --help -v --version"
-  local trunk_commands="open close id backup list rm"
+  local trunk_commands="id backup list rm"
 
   COMPREPLY=()
 
