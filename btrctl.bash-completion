@@ -1,4 +1,4 @@
-_btrctl() {
+__btrctl() {
   local cur word i first_arg
   cur="${COMP_WORDS[COMP_CWORD]}"
 
@@ -35,4 +35,4 @@ _btrctl() {
   COMPREPLY=($(compgen -W "$(command btrctl list 2>/dev/null | awk 'NR > 1 { print $2 }')" -- "$cur"))
 }
 
-complete -F _btrctl btrctl
+complete -F __btrctl btrctl
