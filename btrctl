@@ -177,6 +177,31 @@ _next_most_recent_set() {
   fi
 }
 
+_snapshot_flags() {
+  local snapshots_dir="$1" set_name="$2"
+  local flags="" link link_name link_target
+
+  if [ -L "${snapshots_dir}/latest" ]; then
+    link_target=$(readlink -f "${snapshots_dir}/latest" 2>/dev/null || true)
+    if [ -n "$link_target" ] && [ -d "$link_target" ] && \
+      [ "$(basename "$link_target")" = "$set_name" ]; then
+      flags="latest"
+    fi
+  fi
+
+  for link in "${snapshots_dir}"/trunk_*; do
+    [ -L "$link" ] || continue
+    link_name=$(basename "$link")
+    link_target=$(readlink -f "$link" 2>/dev/null || true)
+    [ -n "$link_target" ] && [ -d "$link_target" ] || continue
+    [ "$(basename "$link_target")" = "$set_name" ] || continue
+    [ -n "$flags" ] && flags+=", "
+    flags+="$link_name"
+  done
+
+  printf '%s\n' "$flags"
+}
+
 _delete_set_dir() {
   local set_dir="$1" subvol_path
   _info "This will permanently delete: ${set_dir}"
@@ -378,26 +403,6 @@ cmd_list() {
     return
   fi
 
-  local latest_target=""
-  if [ -L "${snapshots_dir}/latest" ]; then
-    latest_target=$(basename "$(readlink -f "${snapshots_dir}/latest")")
-  fi
-
-  local -A trunk_indicators=()
-  local link link_name link_target
-  for link in "${snapshots_dir}"/trunk_*; do
-    [ -L "$link" ] || continue
-    link_name=$(basename "$link")
-    link_target=$(readlink -f "$link" 2>/dev/null || true)
-    [ -n "$link_target" ] && [ -d "$link_target" ] || continue
-    link_target=$(basename "$link_target")
-    if [ -n "${trunk_indicators[$link_target]:-}" ]; then
-      trunk_indicators[$link_target]="${trunk_indicators[$link_target]}, ${link_name}"
-    else
-      trunk_indicators[$link_target]="$link_name"
-    fi
-  done
-
   local -a set_names=() tags=() flags_list=()
   local host_width=${#HOST_LABEL} set_width=3 tag_width=3 flags_width=5
   [ "$host_width" -ge 4 ] || host_width=4
@@ -407,14 +412,7 @@ cmd_list() {
     set_name=$(basename "$d")
     _is_set_name "$set_name" || continue
     tag=$(_read_tag "${d%/}")
-    flags="${trunk_indicators[$set_name]:-}"
-    if [ "$set_name" = "$latest_target" ]; then
-      if [ -n "$flags" ]; then
-        flags="latest, ${flags}"
-      else
-        flags="latest"
-      fi
-    fi
+    flags=$(_snapshot_flags "$snapshots_dir" "$set_name")
     set_names+=("$set_name")
     tags+=("$tag")
     flags_list+=("$flags")
@@ -476,6 +474,10 @@ cmd_rm() {
   local snapshots_dir="${BTRFS_MOUNT_POINT}/@snapshots"
   local set_dir="${snapshots_dir}/${set_name}"
   [ -d "$set_dir" ] || _die "no such snapshot set: ${set_dir}"
+
+  local flags
+  flags=$(_snapshot_flags "$snapshots_dir" "$set_name")
+  [ -z "$flags" ] || _warn "Snapshot set ${set_name} is current: ${flags}"
 
   _delete_set_dir "$set_dir" || return 1
 

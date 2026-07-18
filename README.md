@@ -66,7 +66,8 @@ COMMANDS:
 
   rm SET_NAME [--host HOST]
       Remove a local snapshot set by timestamp name. Prompts for
-      confirmation before deleting.
+      confirmation before deleting. Warns when the set is flagged as latest
+      or by one or more trunk_<id> tracking symlinks.
 
         --host HOST         Run against HOST instead of the local machine
 
