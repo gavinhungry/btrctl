@@ -467,6 +467,7 @@ cmd_rm() {
     esac
   done
   [ -n "$set_name" ] || _die "rm: SET_NAME is required"
+  _is_set_name "$set_name" || _die "rm: invalid SET_NAME: $set_name"
 
   _maybe_dispatch_remote "$host" rm "$set_name" && return
   _ensure_btrfs_mounted
@@ -831,6 +832,7 @@ cmd_trunk_rm() {
   local host_label="${arg%%/*}"
   local set_name="${arg#*/}"
   [ -n "$host_label" ] && [ -n "$set_name" ] || _die "trunk rm: expected HOST/SET_NAME"
+  _is_set_name "$set_name" || _die "trunk rm: invalid SET_NAME: $set_name"
 
   _ensure_trunk_mounted
 
