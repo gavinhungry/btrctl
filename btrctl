@@ -100,19 +100,9 @@ _update_symlink() {
   ln -sfn "$target" "$link_path"
 }
 
-_mount_point() {
-  _info "Mounting ${1} ..."
-  mount "$1"
-}
-
-_umount_point() {
-  _info "Unmounting ${1} ..."
-  umount "$1"
-}
-
 _ensure_btrfs_mounted() {
   _require_root
-  mountpoint -q "$BTRFS_MOUNT_POINT" || _mount_point "$BTRFS_MOUNT_POINT"
+  mountpoint -q "$BTRFS_MOUNT_POINT" || _die "${BTRFS_MOUNT_POINT} is not mounted"
 }
 
 _run_snapshot_hook() {
@@ -306,36 +296,6 @@ _maybe_dispatch_remote() {
   [ -n "$host" ] || return 1
   _dispatch_remote "$host" "$subcmd" "$@"
   return 0
-}
-
-cmd_mount() {
-  local host
-
-  _parse_host_only_args mount host "$@"
-  _maybe_dispatch_remote "$host" mount && return
-
-  _require_root
-  if mountpoint -q "$BTRFS_MOUNT_POINT"; then
-    _warn "${BTRFS_MOUNT_POINT} is already mounted"
-    return
-  fi
-  _mount_point "$BTRFS_MOUNT_POINT"
-  _info "Mounted ${BTRFS_MOUNT_POINT}"
-}
-
-cmd_umount() {
-  local host
-
-  _parse_host_only_args umount host "$@"
-  _maybe_dispatch_remote "$host" umount && return
-
-  _require_root
-  if ! mountpoint -q "$BTRFS_MOUNT_POINT"; then
-    _warn "${BTRFS_MOUNT_POINT} is already unmounted"
-    return
-  fi
-  _umount_point "$BTRFS_MOUNT_POINT"
-  _info "Unmounted ${BTRFS_MOUNT_POINT}"
 }
 
 cmd_snapshot() {
@@ -671,8 +631,8 @@ _trunk_backup() {
     read -rs -p "$(_remote_sudo_prompt "$host")" SRC_PW
     echo >&2
 
-    _src_run "mountpoint -q '${REMOTE_BTRFS_MOUNT_POINT}' || mount '${REMOTE_BTRFS_MOUNT_POINT}'" || \
-      _die "failed to ensure ${REMOTE_BTRFS_MOUNT_POINT} is mounted on ${host}"
+    _src_run "mountpoint -q '${REMOTE_BTRFS_MOUNT_POINT}'" || \
+      _die "${REMOTE_BTRFS_MOUNT_POINT} is not mounted on ${host}"
   else
     _ensure_btrfs_mounted
     label="$HOST_LABEL"
@@ -924,8 +884,6 @@ ${c_bold}USAGE:${c_reset}
   ${c_bold}btrctl${c_reset} <command> [options]
 
 ${c_bold}COMMANDS:${c_reset}
-  ${c_bold}mount${c_reset} [--host ${c_var}HOST${c_reset}]
-  ${c_bold}umount|unmount${c_reset} [--host ${c_var}HOST${c_reset}]
   ${c_bold}snapshot${c_reset} [--tag ${c_var}NAME${c_reset}] [--host ${c_var}HOST${c_reset}]
   ${c_bold}list${c_reset} [--host ${c_var}HOST${c_reset}]
   ${c_bold}latest${c_reset} [--host ${c_var}HOST${c_reset}]
@@ -954,8 +912,6 @@ main() {
   case "$cmd" in
     "")                    cmd_help; exit 1  ;;
     help|-h|--help)        cmd_help          ;;
-    mount)          shift; cmd_mount "$@"    ;;
-    umount|unmount) shift; cmd_umount "$@"   ;;
     snapshot)       shift; cmd_snapshot "$@" ;;
     list)           shift; cmd_list "$@"     ;;
     latest)         shift; cmd_latest "$@"   ;;

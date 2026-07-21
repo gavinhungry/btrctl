@@ -15,25 +15,18 @@ ENVIRONMENT:
       /etc/btrctl.conf. Useful for a second, independent btrfs pool on the same
       host (its own HOST_LABEL/BTRFS_MOUNT_POINT/ SUBVOLUMES) while still
       sharing TRUNK_* settings from the base config. If set and FILE does not
-      exist, this is a hard error. Preserved automatically across the automatic
-      sudo elevation that happens when btrctl isn't already running as root.
+       exist, this is a hard error. Preserved automatically across the automatic
+       sudo elevation that happens when btrctl isn't already running as root.
+
+SOURCE MOUNTS:
+  Commands that access $BTRFS_MOUNT_POINT require it to already be mounted.
+  With --host, the remote host's configured BTRFS_MOUNT_POINT must already be
+  mounted.
 
 COMMANDS:
-  mount [--host HOST]
-      Mount $BTRFS_MOUNT_POINT. Says so and exits if already mounted.
-
-        --host HOST         Run against HOST instead of the local machine
-
-  umount [--host HOST]
-  unmount [--host HOST]
-      Unmount $BTRFS_MOUNT_POINT. Says so and exits if already unmounted.
-
-        --host HOST         Run against HOST instead of the local machine
-
   snapshot [--tag NAME] [--host HOST]
       Take a snapshot set of all configured subvolumes under $BTRFS_MOUNT_POINT.
-      Mounts $BTRFS_MOUNT_POINT automatically if not already mounted. If
-      $BTRFS_MOUNT_POINT/.btrctl/pre-snapshot exists and is executable, it is
+      If $BTRFS_MOUNT_POINT/.btrctl/pre-snapshot exists and is executable, it is
       run (cwd = $BTRFS_MOUNT_POINT) before snapshotting begins; a non-zero exit
       aborts the snapshot before any subvolumes are touched. If
       $BTRFS_MOUNT_POINT/.btrctl/post-snapshot exists and is executable, it is
