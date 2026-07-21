@@ -789,38 +789,89 @@ _trunk_backup() {
   _info "Backed up ${label}/${set_timestamp}${host:+ (remote: ${host})} to trunk (id: ${trunk_id})"
 }
 
+_trunk_host_labels() {
+  local host_dir label
+  for host_dir in "${TRUNK_MOUNT_POINT}"/@*/; do
+    host_dir="${host_dir%/}"
+    [ -f "${host_dir}/.btrctl" ] || continue
+    label="${host_dir##*/}"
+    printf '%s\n' "${label#@}"
+  done
+}
+
+cmd_trunk_hosts() {
+  [ $# -eq 0 ] || _die "trunk hosts: usage: trunk hosts"
+  _ensure_trunk_mounted
+  _trunk_host_labels
+}
+
 cmd_trunk_list() {
   [ $# -le 1 ] || _die "trunk list: usage: trunk list [HOST]"
 
-  local label="${1:-$HOST_LABEL}"
-  case "$label" in
+  local requested_label="${1:-}"
+  case "$requested_label" in
     --*) _die "trunk list: HOST is a positional argument, not a flag" ;;
   esac
 
   _ensure_trunk_mounted
 
-  local host_dir="${TRUNK_MOUNT_POINT}/@${label}"
-  if [ ! -d "$host_dir" ]; then
-    _info "No trunk backups found for host '${label}'."
-    return
+  local -a host_dirs=() set_hosts=() set_names=() tags=()
+  local host_dir label trunk_host d set_name tag
+  if [ -n "$requested_label" ]; then
+    host_dir="${TRUNK_MOUNT_POINT}/@${requested_label}"
+    if [ ! -d "$host_dir" ]; then
+      _info "No trunk backups found for host '${requested_label}'."
+      return
+    fi
+    host_dirs+=("$host_dir")
+  else
+    while IFS= read -r label; do
+      host_dirs+=("${TRUNK_MOUNT_POINT}/@${label}")
+    done < <(_trunk_host_labels)
+    [ "${#host_dirs[@]}" -gt 0 ] || {
+      _info "No trunk backups found."
+      return
+    }
   fi
 
-  _require_btrctl_marker "$host_dir"
+  local host_width=4
+  for host_dir in "${host_dirs[@]}"; do
+    _require_btrctl_marker "$host_dir"
+    label="${host_dir##*/}"
+    label="${label#@}"
+    trunk_host="trunk/${label}"
+    [ "${#trunk_host}" -le "$host_width" ] || host_width=${#trunk_host}
 
-  local trunk_host="trunk/${label}"
-  local host_width=${#trunk_host}
+    for d in "$host_dir"/*/; do
+      set_name=$(basename "$d")
+      _is_set_name "$set_name" || continue
+      tag=$(_read_tag "${d%/}")
+      set_hosts+=("$trunk_host")
+      set_names+=("$set_name")
+      tags+=("$tag")
+    done
+  done
+
   [ "$host_width" -ge 4 ] || host_width=4
   printf '%s%-*s  %-20s  %s%s\n' \
     "$OUT_BOLD" "$host_width" "HOST" "SET" "TAG" "$OUT_RESET"
-  local found=0 d set_name tag
-  for d in "$host_dir"/*/; do
-    set_name=$(basename "$d")
-    _is_set_name "$set_name" || continue
-    tag=$(_read_tag "${d%/}")
-    printf '%-*s  %-20s  %s\n' "$host_width" "$trunk_host" "$set_name" "$tag"
-    found=1
+
+  local i previous_host=""
+  for i in "${!set_names[@]}"; do
+    if [ -n "$previous_host" ] && [ "${set_hosts[i]}" != "$previous_host" ]; then
+      printf '\n'
+    fi
+    printf '%-*s  %-20s  %s\n' \
+      "$host_width" "${set_hosts[i]}" "${set_names[i]}" "${tags[i]}"
+    previous_host="${set_hosts[i]}"
   done
-  [ "$found" -eq 1 ] || _info "No snapshot sets found for host '${label}'."
+  if [ "${#set_names[@]}" -eq 0 ]; then
+    if [ -n "$requested_label" ]; then
+      _info "No snapshot sets found for host '${requested_label}'."
+    else
+      _info "No snapshot sets found."
+    fi
+  fi
 }
 
 cmd_trunk_rm() {
@@ -883,6 +934,7 @@ ${c_bold}COMMANDS:${c_reset}
 
   ${c_bold}trunk id${c_reset}
   ${c_bold}trunk backup${c_reset} [${c_var}SET_NAME${c_reset}] [--host ${c_var}HOST${c_reset}]
+  ${c_bold}trunk hosts${c_reset}
   ${c_bold}trunk list${c_reset} [${c_var}HOST${c_reset}]
   ${c_bold}trunk rm${c_reset} ${c_var}HOST${c_reset}/${c_var}SET_NAME${c_reset}
 
@@ -916,6 +968,7 @@ main() {
       case "$sub" in
         id)             shift; cmd_trunk_id "$@"     ;;
         backup)         shift; cmd_trunk_backup "$@" ;;
+        hosts)          shift; cmd_trunk_hosts "$@"  ;;
         list)           shift; cmd_trunk_list "$@"   ;;
         rm)             shift; cmd_trunk_rm "$@"     ;;
         *) _die "unknown trunk subcommand: ${sub:-<none>}" ;;

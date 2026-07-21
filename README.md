@@ -100,12 +100,16 @@ COMMANDS:
         --host HOST         Back up HOST's selected snapshot set instead of
                               the local machine's
 
+  trunk hosts
+      Print the HOST_LABEL of each btrctl-managed host directory on trunk,
+      one per line. Directories without a .btrctl marker are skipped.
+
   trunk list [HOST]
-      List snapshot sets stored on trunk for a given host (default: local
-      machine's HOST_LABEL). HOST is a HOST_LABEL, not an SSH alias, and
-      no SSH connection is ever made (same as trunk rm's HOST). Aborts
-      with an error if /trunk/@<HOST_LABEL> exists but is missing its
-      .btrctl marker.
+      List snapshot sets stored on trunk across all hosts. Specify HOST to
+      list only that host. HOST is a HOST_LABEL, not an SSH alias, and no
+      SSH connection is ever made (same as trunk rm's HOST). Automatic
+      discovery skips directories without a .btrctl marker; explicitly
+      listing such a HOST aborts with an error.
 
   trunk rm HOST/SET_NAME
       Remove a snapshot set from trunk. HOST is required and explicit;

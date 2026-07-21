@@ -1,9 +1,25 @@
+__btrctl_trunk_hosts() {
+  local btrctl_path
+
+  btrctl_path=$(type -P btrctl || true)
+  [ -n "$btrctl_path" ] || return
+
+  if [ "$(id -u)" -eq 0 ]; then
+    command "$btrctl_path" trunk hosts 2>/dev/null || true
+  elif [ -n "${BTRCTL_CONF:-}" ]; then
+    command sudo -n BTRCTL_CONF="$BTRCTL_CONF" -- "$btrctl_path" trunk hosts 2>/dev/null || true
+  else
+    command sudo -n -- "$btrctl_path" trunk hosts 2>/dev/null || true
+  fi
+}
+
 __btrctl() {
-  local cur word i first_arg
+  local cur word i first_arg kind expect="" options="" set_candidates=""
+  local host_seen=0 tag_seen=0 positional_count=0
   cur="${COMP_WORDS[COMP_CWORD]}"
 
   local commands="mount umount unmount snapshot list latest rm tag trunk config help version -h --help -v --version"
-  local trunk_commands="id backup list rm"
+  local trunk_commands="id backup hosts list rm"
 
   COMPREPLY=()
 
@@ -17,22 +33,110 @@ __btrctl() {
     return
   fi
 
-  if [ "${COMP_WORDS[1]}" = "rm" ]; then
-    first_arg=2
-  elif [ "${COMP_WORDS[1]}" = "trunk" ] && [ "${COMP_WORDS[2]}" = "backup" ]; then
-    first_arg=3
-  else
+  if [ "${COMP_WORDS[1]}" = "trunk" ] && [ "${COMP_WORDS[2]}" = "list" ] &&
+    [ "$COMP_CWORD" -eq 3 ]; then
+    [[ "$cur" = -* ]] && return
+    COMPREPLY=($(compgen -W "$(__btrctl_trunk_hosts)" -- "$cur"))
     return
   fi
 
+  if [ "${COMP_WORDS[1]}" = "trunk" ] && [ "${COMP_WORDS[2]}" = "rm" ] &&
+    [ "$COMP_CWORD" -eq 3 ]; then
+    [[ "$cur" = -* ]] && return
+    COMPREPLY=($(compgen -W "$(__btrctl_trunk_hosts | awk '{ print $0 "/" }')" -- "$cur"))
+    compopt -o nospace
+    return
+  fi
+
+  case "${COMP_WORDS[1]}" in
+    mount|umount|unmount|list|latest)
+      first_arg=2
+      kind="host-only"
+      ;;
+    snapshot)
+      first_arg=2
+      kind="snapshot"
+      ;;
+    rm)
+      first_arg=2
+      kind="rm"
+      ;;
+    tag)
+      first_arg=2
+      kind="tag"
+      ;;
+    trunk)
+      [ "${COMP_WORDS[2]}" = "backup" ] || return
+      first_arg=3
+      kind="trunk-backup"
+      ;;
+    *) return ;;
+  esac
+
   for ((i = first_arg; i < COMP_CWORD; i++)); do
     word="${COMP_WORDS[i]}"
-    [ "$word" = "--host" ] && return
-    [[ "$word" != -* ]] && return
+    if [ -n "$expect" ]; then
+      case "$expect" in
+        host) host_seen=1 ;;
+        tag) tag_seen=1 ;;
+      esac
+      expect=""
+      continue
+    fi
+
+    case "$word" in
+      --host) expect="host" ;;
+      --tag)
+        [ "$kind" = "snapshot" ] || return
+        expect="tag"
+        ;;
+      -*) return ;;
+      *)
+        case "$kind" in
+          host-only|snapshot) return ;;
+        esac
+        positional_count=$((positional_count + 1))
+        ;;
+    esac
   done
 
-  [[ "$cur" = -* ]] && return
-  COMPREPLY=($(compgen -W "$(command btrctl list 2>/dev/null | awk 'NR > 1 { print $2 }')" -- "$cur"))
+  case "$expect" in
+    host)
+      COMPREPLY=($(compgen -W "$(__btrctl_trunk_hosts)" -- "$cur"))
+      return
+      ;;
+    tag) return ;;
+  esac
+
+  case "$kind" in
+    host-only)
+      [ "$host_seen" -eq 0 ] && options="--host"
+      ;;
+    snapshot)
+      [ "$host_seen" -eq 0 ] && options="--host"
+      [ "$tag_seen" -eq 0 ] && options="${options:+${options} }--tag"
+      ;;
+    rm)
+      [ "$positional_count" -le 1 ] || return
+      [ "$host_seen" -eq 0 ] && options="--host"
+      if [ "$host_seen" -eq 0 ] && [ "$positional_count" -eq 0 ]; then
+        set_candidates=$(command btrctl list 2>/dev/null | awk 'NR > 1 { print $2 }')
+      fi
+      ;;
+    tag)
+      [ "$positional_count" -le 2 ] || return
+      [ "$host_seen" -eq 0 ] && options="--host"
+      ;;
+    trunk-backup)
+      [ "$positional_count" -le 1 ] || return
+      [ "$host_seen" -eq 0 ] && options="--host"
+      if [ "$host_seen" -eq 0 ] && [ "$positional_count" -eq 0 ]; then
+        set_candidates=$(command btrctl list 2>/dev/null | awk 'NR > 1 { print $2 }')
+      fi
+      ;;
+  esac
+
+  COMPREPLY=($(compgen -W "${options}${options:+ }${set_candidates}" -- "$cur"))
 }
 
 complete -F __btrctl btrctl
