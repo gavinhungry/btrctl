@@ -754,6 +754,7 @@ _trunk_backup() {
 
     _info "Backing up ${host:+${host}:}${subvol} (${set_timestamp}) to ${target_set_dir} ..."
     if [ -n "$parent_path" ]; then
+      _info "Using parent snapshot set ${parent_timestamp} for ${host:+${host}:}${subvol}"
       send_cmd="btrfs send -p '${parent_path}' '${current_path}'"
       kind="incremental"
     else
