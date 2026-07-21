@@ -18,7 +18,7 @@ __btrctl() {
   local host_seen=0 tag_seen=0 positional_count=0
   cur="${COMP_WORDS[COMP_CWORD]}"
 
-  local commands="mount umount unmount snapshot list latest rm tag trunk config help version -h --help -v --version"
+  local commands="mount umount unmount snapshot list latest rm tag trunk config help -h --help"
   local trunk_commands="id backup hosts list rm"
 
   COMPREPLY=()
