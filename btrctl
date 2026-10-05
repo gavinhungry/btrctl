@@ -340,7 +340,7 @@ _prune_plan() {
       _plan_reasons+=("${reason}${reason:+, }future")
       continue
     fi
-    [ "$epoch" -lt "$all_cutoff" ] || reason+="${reason:+, }all (24h)"
+    [ "$epoch" -lt "$all_cutoff" ] || reason+="${reason:+, }recent"
     _plan_reasons+=("$reason")
     keys=("yearly:${name:0:4}")
     [ "$epoch" -lt "$hour_cutoff" ] || keys+=("hourly:${name:0:13}")

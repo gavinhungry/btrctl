@@ -152,10 +152,11 @@ COMMANDS:
 
 Prune retention
 ---------------
-Keep the union of: all snapshots for 24 hours; latest per hour for 72 hours;
-latest per day for 7 days; latest per Sunday-start week for 4 weeks; latest per
-month for 12 calendar months; and latest per year forever. Protected sets also
-participate in bucket selection. Pruning removes whole sets and their metadata.
+Keep the union of: all snapshots for 24 hours (shown as `recent`); latest per
+hour for 72 hours; latest per day for 7 days; latest per Sunday-start week for
+4 weeks; latest per month for 12 calendar months; and latest per year forever.
+Protected sets also participate in bucket selection. Pruning removes whole sets
+and their metadata.
 
 Timestamp directory names determine age and calendar buckets. Each window
 includes its cutoff; days/weeks mean elapsed 24-hour days, while 12 months means
