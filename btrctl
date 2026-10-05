@@ -145,6 +145,8 @@ _validate_tags() {
   local tag
   for tag in "$@"; do
     [ -n "$tag" ] || _die "tags must not be empty"
+    [[ "$tag" != -* ]] || _die "tags must not begin with '-': ${tag}"
+    [[ "$tag" != *,* ]] || _die "tags must not contain commas: ${tag}"
     [[ "$tag" != *$'\n'* ]] || _die "tags must not contain newlines"
   done
 }
@@ -369,8 +371,14 @@ _run_prune() {
   now=$(date +%s) || return 1
   month_cutoff=$(_prune_month_cutoff "$now") || return 1
   local -a names=() reasons=() delete_paths=()
-  local retained=0 deleted=0 skipped=0 total=0
-  printf '%-6s  %-20s  %-20s  %s\n' ACTION HOST SET REASON
+  local retained=0 deleted=0 skipped=0 total=0 header_shown=0
+  _prune_row() {
+    [ "$header_shown" -eq 1 ] || {
+      printf '%-6s  %-20s  %-20s  %s\n' ACTION HOST SET REASON
+      header_shown=1
+    }
+    printf '%-6s  %-20s  %-20s  %s\n' "$@"
+  }
   for dir in "$@"; do
     label="$HOST_LABEL"
     [ "$local_sets" -eq 1 ] || { label="${dir##*/}"; label="trunk/${label#@}"; }
@@ -380,11 +388,10 @@ _run_prune() {
       reason="${reasons[index]}"
       if [ -n "$reason" ]; then
         retained=$((retained + 1))
-        [ "$dry_run" -eq 0 ] || \
-          printf '%-6s  %-20s  %-20s  %s\n' KEEP "$label" "${names[index]}" "$reason"
+        [ "$dry_run" -eq 0 ] || _prune_row KEEP "$label" "${names[index]}" "$reason"
       else
         delete_paths+=("${dir}/${names[index]}")
-        printf '%-6s  %-20s  %-20s  %s\n' DELETE "$label" "${names[index]}" 'outside retention policy'
+        _prune_row DELETE "$label" "${names[index]}" 'outside retention policy'
       fi
     done
   done
@@ -502,11 +509,13 @@ _parse_host_only_args() {
   done
 }
 
+# With a HOST, run SUBCMD there and exit with the remote status; otherwise
+# return 0 so the caller continues locally.
 _maybe_dispatch_remote() {
-  local host="$1" subcmd="$2"; shift 2
-  [ -n "$host" ] || return 1
-  _dispatch_remote "$host" "$subcmd" "$@"
-  return 0
+  local host="$1" subcmd="$2" status=0; shift 2
+  [ -n "$host" ] || return 0
+  _dispatch_remote "$host" "$subcmd" "$@" || status=$?
+  exit "$status"
 }
 
 cmd_snapshot() {
@@ -534,7 +543,7 @@ cmd_snapshot() {
   for tag in "${snapshot_tags[@]}"; do
     remote_args+=(--tag "$tag")
   done
-  _maybe_dispatch_remote "$host" snapshot "${remote_args[@]}" && return
+  _maybe_dispatch_remote "$host" snapshot "${remote_args[@]}"
   _ensure_btrfs_mounted
   _run_snapshot_hook pre-snapshot || \
     _die "pre-snapshot hook failed; aborting snapshot"
@@ -574,7 +583,7 @@ cmd_list() {
   local host
 
   _parse_host_only_args list host "$@"
-  _maybe_dispatch_remote "$host" list && return
+  _maybe_dispatch_remote "$host" list
   _ensure_btrfs_mounted
 
   local snapshots_dir="${BTRFS_MOUNT_POINT}/@snapshots"
@@ -627,12 +636,9 @@ cmd_prune() {
       *) _die "prune: unknown argument: $1" ;;
     esac
   done
-  if [ -n "$host" ]; then
-    local -a remote_args=()
-    [ "$dry_run" -eq 0 ] || remote_args+=(--dry-run)
-    _dispatch_remote "$host" prune "${remote_args[@]}" || return $?
-    return 0
-  fi
+  local -a remote_args=()
+  [ "$dry_run" -eq 0 ] || remote_args+=(--dry-run)
+  _maybe_dispatch_remote "$host" prune "${remote_args[@]}"
   _ensure_btrfs_mounted
   local snapshots_dir="${BTRFS_MOUNT_POINT}/@snapshots"
   [ -d "$snapshots_dir" ] || { _info "No snapshots found."; return 0; }
@@ -643,7 +649,7 @@ cmd_latest() {
   local host
 
   _parse_host_only_args latest host "$@"
-  _maybe_dispatch_remote "$host" latest && return
+  _maybe_dispatch_remote "$host" latest
   _ensure_btrfs_mounted
 
   local snapshots_dir="${BTRFS_MOUNT_POINT}/@snapshots"
@@ -674,7 +680,7 @@ cmd_rm() {
   [ -n "$set_name" ] || _die "rm: SET_NAME is required"
   _is_set_name "$set_name" || _die "rm: invalid SET_NAME: $set_name"
 
-  _maybe_dispatch_remote "$host" rm "$set_name" && return
+  _maybe_dispatch_remote "$host" rm "$set_name"
   _ensure_btrfs_mounted
 
   local snapshots_dir="${BTRFS_MOUNT_POINT}/@snapshots"
@@ -726,7 +732,7 @@ cmd_tag() {
   _is_set_name "$set_name" || _die "tag: invalid SET_ID: ${set_name}"
   _validate_tag_operation tag "$action" "${args[@]:2}"
 
-  _maybe_dispatch_remote "$host" tag "${args[@]}" && return
+  _maybe_dispatch_remote "$host" tag "${args[@]}"
   _ensure_btrfs_mounted
 
   local snapshots_dir="${BTRFS_MOUNT_POINT}/@snapshots"
@@ -944,9 +950,15 @@ _trunk_backup() {
     parent_path=""
     # A newer tracking target cannot be an incremental parent for an older selected set.
     if [ -n "$parent_timestamp" ] && [[ "$parent_timestamp" < "$set_timestamp" ]]; then
-      local candidate
+      local candidate trunk_parent
       candidate=$(_snapshot_subvol_path "${snapshots_dir}/${parent_timestamp}" "$parent_timestamp" "$label" "$subvol")
-      _src_run "test -e '${candidate}'" && parent_path="$candidate"
+      # btrfs receive needs the parent to exist on trunk too; it may have been pruned or removed.
+      trunk_parent=$(_snapshot_subvol_path "${target_host_dir}/${parent_timestamp}" "$parent_timestamp" "$label" "$subvol")
+      if [ ! -d "$trunk_parent" ]; then
+        _info "Parent snapshot set ${parent_timestamp} not found on trunk for ${host:+${host}:}${subvol}; sending full snapshot"
+      elif _src_run "test -e '${candidate}'"; then
+        parent_path="$candidate"
+      fi
     fi
 
     _info "Backing up ${host:+${host}:}${subvol} (${set_timestamp}) to ${target_set_dir} ..."

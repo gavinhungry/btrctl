@@ -79,11 +79,11 @@ COMMANDS:
       succeeds without changing the tag list. Removing the final tag removes the
       tags file.
 
-      Tags are case-sensitive and nonempty. Quote tags containing spaces;
-      embedded newlines are not allowed. Tags are stored one per line in
-      SET_DIR/.btrctl/tags, with duplicates removed and insertion order
-      preserved. Listings use a TAGS heading and comma-separated tags. The old
-      .btrctl/tag file and tag SET_ID TAG_NAME syntax are no longer used.
+      Tags are case-sensitive and nonempty. Quote tags containing spaces; tags
+      may not begin with "-" or contain commas or newlines. Tags are stored one
+      per line in SET_DIR/.btrctl/tags, with duplicates removed and insertion
+      order preserved. Listings use a TAGS heading and comma-separated tags. The
+      old .btrctl/tag file and tag SET_ID TAG_NAME syntax are no longer used.
 
         --host HOST         Run against HOST instead of the local machine
 
@@ -104,7 +104,9 @@ COMMANDS:
       subvolumes that may also live on trunk). To adopt a pre-existing
       subvolume, manually create an empty .btrctl file inside it. Snapshot-set
       metadata under .btrctl is copied after subvolume receive. A trunk backup
-      fails if the destination snapshot set already exists.
+      fails if the destination snapshot set already exists. Incremental sends
+      use the set tracked by trunk_<id> as parent only when that set still
+      exists on both the source and trunk; otherwise a full send is used.
 
         --host HOST         Back up HOST's selected snapshot set instead of
                             the local machine's
