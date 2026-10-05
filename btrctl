@@ -21,6 +21,8 @@ fi
 
 OUT_RESET=''
 OUT_BOLD=''
+OUT_RED=''
+OUT_GREEN=''
 ERR_RESET=''
 ERR_RED=''
 ERR_YELLOW=''
@@ -31,6 +33,8 @@ if [ -z "${NO_COLOR:-}" ]; then
   if [ -t 1 ]; then
     OUT_RESET=$'\033[0m'
     OUT_BOLD=$'\033[1m'
+    OUT_RED=$'\033[1;31m'
+    OUT_GREEN=$'\033[1;32m'
   fi
 
   if [ -t 2 ]; then
@@ -373,11 +377,16 @@ _run_prune() {
   local -a names=() reasons=() delete_paths=()
   local retained=0 deleted=0 skipped=0 total=0 header_shown=0
   _prune_row() {
+    local action="$1" color=""; shift
     [ "$header_shown" -eq 1 ] || {
-      printf '%-6s  %-20s  %-20s  %s\n' ACTION HOST SET REASON
+      printf '%s%-6s  %-20s  %-20s  %s%s\n' "$OUT_BOLD" ACTION HOST SET REASON "$OUT_RESET"
       header_shown=1
     }
-    printf '%-6s  %-20s  %-20s  %s\n' "$@"
+    case "$action" in
+      KEEP) color="$OUT_GREEN" ;;
+      DELETE) color="$OUT_RED" ;;
+    esac
+    printf '%s%-6s%s  %-20s  %-20s  %s\n' "$color" "$action" "$OUT_RESET" "$@"
   }
   for dir in "$@"; do
     label="$HOST_LABEL"
