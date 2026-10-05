@@ -52,6 +52,14 @@ COMMANDS:
 
         --host HOST         Run against HOST instead of the local machine
 
+  prune [--host HOST] [--dry-run]
+      Prune local snapshot sets using the retention policy below. Always keeps
+      sets targeted by latest or any current trunk_* pointer, and sets tagged
+      noprune. Uses the local clock/timezone, or HOST's when run remotely.
+      Previews deletions and asks for one batch confirmation. Stops on deletion
+      failure. --dry-run shows retained sets and reasons without deleting or
+      prompting. Protections are checked again immediately before deletion.
+
   latest [--host HOST]
       Print just the timestamp ID of the latest local snapshot set, and nothing
       else -- suitable for capturing in scripts.
@@ -112,6 +120,13 @@ COMMANDS:
       skips directories without a .btrctl marker; explicitly listing such a HOST
       aborts with an error.
 
+  trunk prune {HOST|--all} [--dry-run]
+      Prune one trunk HOST, or all btrctl-managed hosts with --all. HOST is a
+      stored HOST_LABEL, not an SSH alias. A scope is required; HOST and --all
+      cannot be combined. Retention is independent per host, using the attached
+      machine's clock/timezone. Keeps sets tagged noprune. Confirmation and
+      --dry-run behave like prune. Explicit HOST selection requires its marker.
+
   trunk rm HOST/SET_NAME
       Remove a snapshot set from trunk. HOST is required and explicit; there is
       no implicit "local machine" default for this destructive operation.
@@ -132,6 +147,20 @@ COMMANDS:
   help, -h, --help
       Show this help text.
 ```
+
+Prune retention
+---------------
+Keep the union of: all snapshots for 24 hours; latest per hour for 72 hours;
+latest per day for 7 days; latest per Sunday-start week for 4 weeks; latest per
+month for 12 calendar months; and latest per year forever. Protected sets also
+participate in bucket selection. Pruning removes whole sets and their metadata.
+
+Timestamp directory names determine age and calendar buckets. Each window
+includes its cutoff; days/weeks mean elapsed 24-hour days, while 12 months means
+the same local date/time one year earlier (February 29 clamps to February 28; a
+cutoff in a daylight-saving gap shifts forward through the gap). Future-dated
+sets are kept; invalid timestamps are warned about and skipped. The clock is
+captured once per command. No timezone metadata is required.
 
 License
 -------

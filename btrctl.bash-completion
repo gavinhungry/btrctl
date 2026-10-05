@@ -15,11 +15,11 @@ __btrctl_trunk_hosts() {
 
 __btrctl() {
   local cur word i first_arg kind expect="" options="" set_candidates=""
-  local host_seen=0 positional_count=0
+  local host_seen=0 positional_count=0 dry_run_seen=0 all_seen=0
   cur="${COMP_WORDS[COMP_CWORD]}"
 
-  local commands="snapshot list latest rm tag trunk config help -h --help"
-  local trunk_commands="id backup hosts list rm tag"
+  local commands="snapshot list latest prune rm tag trunk config help -h --help"
+  local trunk_commands="id backup hosts list prune rm tag"
 
   COMPREPLY=()
 
@@ -54,6 +54,10 @@ __btrctl() {
       first_arg=2
       kind="host-only"
       ;;
+    prune)
+      first_arg=2
+      kind="prune"
+      ;;
     snapshot)
       first_arg=2
       kind="snapshot"
@@ -71,6 +75,7 @@ __btrctl() {
       case "${COMP_WORDS[2]}" in
         backup) kind="trunk-backup" ;;
         tag) kind="trunk-tag" ;;
+        prune) kind="trunk-prune" ;;
         *) return ;;
       esac
       ;;
@@ -89,8 +94,16 @@ __btrctl() {
 
     case "$word" in
       --host)
-        [ "$kind" != "trunk-tag" ] || return
+        [[ "$kind" != trunk-tag && "$kind" != trunk-prune ]] || return
         expect="host"
+        ;;
+      --dry-run)
+        [[ "$kind" = prune || "$kind" = trunk-prune ]] || return
+        dry_run_seen=1
+        ;;
+      --all)
+        [ "$kind" = "trunk-prune" ] && [ "$positional_count" -eq 0 ] || return
+        all_seen=1
         ;;
       --tag)
         [ "$kind" = "snapshot" ] || return
@@ -99,7 +112,8 @@ __btrctl() {
       -*) return ;;
       *)
         case "$kind" in
-          host-only|snapshot) return ;;
+          host-only|snapshot|prune) return ;;
+          trunk-prune) [ "$all_seen" -eq 0 ] || return ;;
         esac
         positional_count=$((positional_count + 1))
         ;;
@@ -117,6 +131,18 @@ __btrctl() {
   case "$kind" in
     host-only)
       [ "$host_seen" -eq 0 ] && options="--host"
+      ;;
+    prune)
+      [ "$host_seen" -eq 0 ] && options="--host"
+      [ "$dry_run_seen" -eq 1 ] || options="${options:+${options} }--dry-run"
+      ;;
+    trunk-prune)
+      [ "$positional_count" -le 1 ] || return
+      [ "$dry_run_seen" -eq 1 ] || options="--dry-run"
+      if [ "$positional_count" -eq 0 ] && [ "$all_seen" -eq 0 ]; then
+        options="${options:+${options} }--all"
+        [[ "$cur" = -* ]] || set_candidates=$(__btrctl_trunk_hosts)
+      fi
       ;;
     snapshot)
       [ "$host_seen" -eq 0 ] && options="--host"

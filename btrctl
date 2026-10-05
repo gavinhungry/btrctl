@@ -256,14 +256,162 @@ _snapshot_flags() {
 }
 
 _delete_set_dir() {
-  local set_dir="$1" subvol_path
+  local set_dir="$1"
   _info "This will permanently delete: ${set_dir}"
   _confirm "Proceed?" || { _info "Aborted."; return 1; }
   _info "Deleting snapshots ..."
+  _delete_set_contents "$set_dir"
+}
+
+_delete_set_contents() {
+  local set_dir="$1" subvol_path
   for subvol_path in "$set_dir"/@snapshot-*; do
-    btrfs subvolume delete "$subvol_path"
+    btrfs subvolume delete "$subvol_path" || return 1
   done
   rm -rf "$set_dir"
+}
+
+_prune_protection() {
+  local set_dir="$1" local_sets="$2" snapshots_dir="${1%/*}"
+  local -a protection_tags=()
+  local reasons="" target link resolved
+  _read_tags "$set_dir" protection_tags || return 1
+  _tag_present noprune "${protection_tags[@]}" && reasons="noprune"
+  if [ "$local_sets" -eq 1 ]; then
+    target=$(readlink -f "$set_dir") || return 1
+    for link in "${snapshots_dir}/latest" "${snapshots_dir}"/trunk_*; do
+      [ -L "$link" ] || continue
+      resolved=$(readlink -f "$link" 2>/dev/null || true)
+      [ "$resolved" = "$target" ] || continue
+      reasons+="${reasons:+, }${link##*/}"
+    done
+  fi
+  printf '%s' "$reasons"
+}
+
+_prune_month_cutoff() {
+  local now="$1" year month day time last_day
+  read -r year month day time < <(date -d "@${now}" '+%Y %m %d %H:%M:%S')
+  # Clamp February 29 when the previous year is not a leap year.
+  last_day=$(date -d "$((10#$year - 1))-${month}-01 +1 month -1 day" +%d) || return 1
+  [ "$((10#$day))" -le "$((10#$last_day))" ] || day="$last_day"
+  # Relative arithmetic normalizes a cutoff falling in a spring-forward gap.
+  date -d "${year}-${month}-${day} ${time} last year" +%s
+}
+
+_prune_plan() {
+  local dir="$1" local_sets="$2" now="$3" month_cutoff="$4"
+  local -n _plan_names="$5" _plan_reasons="$6"
+  _plan_names=()
+  _plan_reasons=()
+  local -a epochs=() keys=()
+  local -A winners=()
+  local d name parsed epoch normalized weekday reason week key index previous
+  # Fixed retention windows, in elapsed seconds. Calendar months are separate.
+  local all_cutoff=$((now - 86400)) hour_cutoff=$((now - 259200))
+  local day_cutoff=$((now - 604800)) week_cutoff=$((now - 2419200))
+
+  for d in "$dir"/*/; do
+    d="${d%/}"
+    [ ! -L "$d" ] || continue
+    name="${d##*/}"
+    _is_set_name "$name" || continue
+    parsed=$(date -d "${name:0:10} ${name:11:2}:${name:13:2}:${name:15:2}" \
+      '+%s %Y-%m-%d-%H%M%S %w' 2>/dev/null) || {
+      _warn "Skipping invalid snapshot timestamp: ${d}"
+      continue
+    }
+    read -r epoch normalized weekday <<< "$parsed"
+    if [ "$normalized" != "$name" ]; then
+      _warn "Skipping invalid snapshot timestamp: ${d}"
+      continue
+    fi
+    reason=$(_prune_protection "$d" "$local_sets") || return 1
+    index=${#_plan_names[@]}
+    _plan_names+=("$name")
+    epochs+=("$epoch")
+    if [ "$epoch" -gt "$now" ]; then
+      _plan_reasons+=("${reason}${reason:+, }future")
+      continue
+    fi
+    [ "$epoch" -lt "$all_cutoff" ] || reason+="${reason:+, }all (24h)"
+    _plan_reasons+=("$reason")
+    keys=("yearly:${name:0:4}")
+    [ "$epoch" -lt "$hour_cutoff" ] || keys+=("hourly:${name:0:13}")
+    [ "$epoch" -lt "$day_cutoff" ] || keys+=("daily:${name:0:10}")
+    if [ "$epoch" -ge "$week_cutoff" ]; then
+      week=$(date -d "${name:0:10} 12:00:00 ${weekday} days ago" +%F) || return 1
+      keys+=("weekly:${week}")
+    fi
+    [ "$epoch" -lt "$month_cutoff" ] || keys+=("monthly:${name:0:7}")
+    for key in "${keys[@]}"; do
+      previous="${winners[$key]:-}"
+      if [ -z "$previous" ] || [ "$epoch" -ge "${epochs[previous]}" ]; then
+        winners["$key"]="$index"
+      fi
+    done
+  done
+
+  # Iterate tiers explicitly so dry-run reasons have a stable order.
+  local tier
+  for tier in hourly daily weekly monthly yearly; do
+    for key in "${!winners[@]}"; do
+      [[ "$key" = "${tier}:"* ]] || continue
+      index="${winners[$key]}"
+      _plan_reasons[index]+="${_plan_reasons[index]:+, }${tier}"
+    done
+  done
+}
+
+_run_prune() {
+  local dry_run="$1" local_sets="$2"; shift 2
+  local now month_cutoff dir label index reason protection
+  now=$(date +%s) || return 1
+  month_cutoff=$(_prune_month_cutoff "$now") || return 1
+  local -a names=() reasons=() delete_paths=()
+  local retained=0 deleted=0 skipped=0 total=0
+  printf '%-6s  %-20s  %-20s  %s\n' ACTION HOST SET REASON
+  for dir in "$@"; do
+    label="$HOST_LABEL"
+    [ "$local_sets" -eq 1 ] || { label="${dir##*/}"; label="trunk/${label#@}"; }
+    _prune_plan "$dir" "$local_sets" "$now" "$month_cutoff" names reasons || return 1
+    for index in "${!names[@]}"; do
+      total=$((total + 1))
+      reason="${reasons[index]}"
+      if [ -n "$reason" ]; then
+        retained=$((retained + 1))
+        [ "$dry_run" -eq 0 ] || \
+          printf '%-6s  %-20s  %-20s  %s\n' KEEP "$label" "${names[index]}" "$reason"
+      else
+        delete_paths+=("${dir}/${names[index]}")
+        printf '%-6s  %-20s  %-20s  %s\n' DELETE "$label" "${names[index]}" 'outside retention policy'
+      fi
+    done
+  done
+  _info "Snapshot sets: ${total}; keep: ${retained}; prune: ${#delete_paths[@]}"
+  [ "$dry_run" -eq 0 ] || { _info "Dry run; no snapshots deleted."; return 0; }
+  [ "${#delete_paths[@]}" -gt 0 ] || { _info "Nothing to prune."; return 0; }
+  _confirm "Permanently delete ${#delete_paths[@]} snapshot set(s)?" || { _info "Aborted."; return 1; }
+  for dir in "${delete_paths[@]}"; do
+    if [ ! -d "$dir" ] || [ -L "$dir" ]; then
+      _warn "Skipping changed or missing snapshot set: ${dir}"
+      skipped=$((skipped + 1))
+      continue
+    fi
+    protection=$(_prune_protection "$dir" "$local_sets") || return 1
+    if [ -n "$protection" ]; then
+      _info "Keeping newly protected snapshot set: ${dir} (${protection})"
+      skipped=$((skipped + 1))
+      continue
+    fi
+    _info "Pruning snapshot set: ${dir}"
+    if ! _delete_set_contents "$dir"; then
+      _error "Failed to prune ${dir}; stopped after ${deleted} deletion(s), ${skipped} skipped; partial set may require clean up"
+      return 1
+    fi
+    deleted=$((deleted + 1))
+  done
+  _info "Pruned ${deleted} snapshot set(s); skipped ${skipped}."
 }
 
 _remote_sudo_prompt() {
@@ -464,6 +612,31 @@ cmd_list() {
       "$tag_width" "${tags[i]}" "$flags_width" "${flags_list[i]}"
   done
   [ "$found" -eq 1 ] || _info "No snapshot sets found."
+}
+
+cmd_prune() {
+  local host="" dry_run=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --host)
+        _consume_opt_value host "$@"
+        [ -n "$host" ] || _die "prune: --host must not be empty"
+        shift 2
+        ;;
+      --dry-run) dry_run=1; shift ;;
+      *) _die "prune: unknown argument: $1" ;;
+    esac
+  done
+  if [ -n "$host" ]; then
+    local -a remote_args=()
+    [ "$dry_run" -eq 0 ] || remote_args+=(--dry-run)
+    _dispatch_remote "$host" prune "${remote_args[@]}" || return $?
+    return 0
+  fi
+  _ensure_btrfs_mounted
+  local snapshots_dir="${BTRFS_MOUNT_POINT}/@snapshots"
+  [ -d "$snapshots_dir" ] || { _info "No snapshots found."; return 0; }
+  _run_prune "$dry_run" 1 "$snapshots_dir"
 }
 
 cmd_latest() {
@@ -898,6 +1071,47 @@ cmd_trunk_list() {
   fi
 }
 
+cmd_trunk_prune() {
+  local requested_label="" all=0 dry_run=0 label host_dir
+  local -a host_dirs=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --all) all=1; shift ;;
+      --dry-run) dry_run=1; shift ;;
+      -*) _die "trunk prune: unknown option: $1" ;;
+      *)
+        [ -z "$requested_label" ] || _die "trunk prune: unexpected extra argument: $1"
+        requested_label="$1"
+        [ -n "$requested_label" ] || _die "trunk prune: HOST must not be empty"
+        case "$requested_label" in
+          */*) _die "trunk prune: invalid HOST: ${requested_label}" ;;
+        esac
+        shift
+        ;;
+    esac
+  done
+  if [ "$all" -eq 1 ]; then
+    [ -z "$requested_label" ] || _die "trunk prune: HOST and --all are mutually exclusive"
+  else
+    [ -n "$requested_label" ] || _die "trunk prune: usage: trunk prune {HOST|--all} [--dry-run]"
+  fi
+  _ensure_trunk_mounted
+  if [ "$all" -eq 1 ]; then
+    while IFS= read -r label; do
+      host_dirs+=("${TRUNK_MOUNT_POINT}/@${label}")
+    done < <(_trunk_host_labels)
+  else
+    host_dir="${TRUNK_MOUNT_POINT}/@${requested_label}"
+    [ -d "$host_dir" ] || _die "no such trunk host: ${host_dir}"
+    host_dirs+=("$host_dir")
+  fi
+  for host_dir in "${host_dirs[@]}"; do
+    _require_btrctl_marker "$host_dir"
+  done
+  [ "${#host_dirs[@]}" -gt 0 ] || { _info "No trunk backups found."; return 0; }
+  _run_prune "$dry_run" 0 "${host_dirs[@]}"
+}
+
 cmd_trunk_rm() {
   [ $# -eq 1 ] || _die "trunk rm: usage: trunk rm HOST/SET_NAME"
   local arg="$1"
@@ -971,6 +1185,7 @@ ${c_bold}USAGE:${c_reset}
 ${c_bold}COMMANDS:${c_reset}
   ${c_bold}snapshot${c_reset} [--tag ${c_var}TAG${c_reset} ...] [--host ${c_var}HOST${c_reset}]
   ${c_bold}list${c_reset} [--host ${c_var}HOST${c_reset}]
+  ${c_bold}prune${c_reset} [--host ${c_var}HOST${c_reset}] [--dry-run]
   ${c_bold}latest${c_reset} [--host ${c_var}HOST${c_reset}]
   ${c_bold}rm${c_reset} ${c_var}SET_NAME${c_reset} [--host ${c_var}HOST${c_reset}]
   ${c_bold}tag${c_reset} ${c_var}SET_ID${c_reset} {add|rm} ${c_var}TAG${c_reset}... [--host ${c_var}HOST${c_reset}]
@@ -979,6 +1194,7 @@ ${c_bold}COMMANDS:${c_reset}
   ${c_bold}trunk backup${c_reset} [${c_var}SET_NAME${c_reset}] [--host ${c_var}HOST${c_reset}]
   ${c_bold}trunk hosts${c_reset}
   ${c_bold}trunk list${c_reset} [${c_var}HOST${c_reset}]
+  ${c_bold}trunk prune${c_reset} {${c_var}HOST${c_reset}|--all} [--dry-run]
   ${c_bold}trunk rm${c_reset} ${c_var}HOST${c_reset}/${c_var}SET_NAME${c_reset}
   ${c_bold}trunk tag${c_reset} ${c_var}HOST${c_reset}/${c_var}SET_ID${c_reset} {add|rm} ${c_var}TAG${c_reset}...
 
@@ -1000,6 +1216,7 @@ main() {
     help|-h|--help)        cmd_help          ;;
     snapshot)       shift; cmd_snapshot "$@" ;;
     list)           shift; cmd_list "$@"     ;;
+    prune)          shift; cmd_prune "$@"    ;;
     latest)         shift; cmd_latest "$@"   ;;
     rm)             shift; cmd_rm "$@"       ;;
     tag)            shift; cmd_tag "$@"      ;;
@@ -1012,6 +1229,7 @@ main() {
         backup)         shift; cmd_trunk_backup "$@" ;;
         hosts)          shift; cmd_trunk_hosts "$@"  ;;
         list)           shift; cmd_trunk_list "$@"   ;;
+        prune)          shift; cmd_trunk_prune "$@"  ;;
         rm)             shift; cmd_trunk_rm "$@"     ;;
         tag)            shift; cmd_trunk_tag "$@"    ;;
         *) _die "unknown trunk subcommand: ${sub:-<none>}" ;;
