@@ -141,18 +141,81 @@ _is_set_name() {
   esac
 }
 
-_read_tag() {
-  [ -f "${1}/.btrctl/tag" ] && cat "${1}/.btrctl/tag" || true
+_validate_tags() {
+  local tag
+  for tag in "$@"; do
+    [ -n "$tag" ] || _die "tags must not be empty"
+    [[ "$tag" != *$'\n'* ]] || _die "tags must not contain newlines"
+  done
 }
 
-_write_tag() {
-  local dir="$1" value="$2"
-  if [ -n "$value" ]; then
+_tag_present() {
+  local wanted="$1" tag; shift
+  for tag in "$@"; do
+    [ "$tag" != "$wanted" ] || return 0
+  done
+  return 1
+}
+
+_read_tags() {
+  local dir="$1" varname="$2" tag
+  local -n _tags_out="$varname"
+  _tags_out=()
+  [ -f "${dir}/.btrctl/tags" ] || return 0
+  while IFS= read -r tag || [ -n "$tag" ]; do
+    [ -n "$tag" ] || continue
+    _tag_present "$tag" "${_tags_out[@]}" || _tags_out+=("$tag")
+  done < "${dir}/.btrctl/tags"
+}
+
+_write_tags() {
+  local dir="$1" tag; shift
+  local -a unique_tags=()
+  _validate_tags "$@"
+  for tag in "$@"; do
+    _tag_present "$tag" "${unique_tags[@]}" || unique_tags+=("$tag")
+  done
+  if [ "${#unique_tags[@]}" -gt 0 ]; then
     mkdir -p "${dir}/.btrctl"
-    printf '%s\n' "$value" > "${dir}/.btrctl/tag"
+    printf '%s\n' "${unique_tags[@]}" > "${dir}/.btrctl/tags"
   else
-    rm -f "${dir}/.btrctl/tag"
+    rm -f "${dir}/.btrctl/tags"
   fi
+}
+
+_display_tags() {
+  local -a display_tags=()
+  local tag separator=""
+  _read_tags "$1" display_tags
+  for tag in "${display_tags[@]}"; do
+    printf '%s%s' "$separator" "$tag"
+    separator=", "
+  done
+}
+
+_modify_tags() {
+  local dir="$1" action="$2" tag; shift 2
+  local -a current_tags=() updated_tags=()
+  _read_tags "$dir" current_tags
+  case "$action" in
+    add) _write_tags "$dir" "${current_tags[@]}" "$@" ;;
+    rm)
+      for tag in "${current_tags[@]}"; do
+        _tag_present "$tag" "$@" || updated_tags+=("$tag")
+      done
+      _write_tags "$dir" "${updated_tags[@]}"
+      ;;
+  esac
+}
+
+_validate_tag_operation() {
+  local cmd_name="$1" action="$2"; shift 2
+  case "$action" in
+    add|rm) ;;
+    *) _die "${cmd_name}: expected add or rm" ;;
+  esac
+  [ $# -gt 0 ] || _die "${cmd_name}: at least one TAG is required"
+  _validate_tags "$@"
 }
 
 _next_most_recent_set() {
@@ -299,11 +362,13 @@ _maybe_dispatch_remote() {
 }
 
 cmd_snapshot() {
-  local tag="" host=""
+  local tag host=""
+  local -a snapshot_tags=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --tag)
         _consume_opt_value tag "$@"
+        snapshot_tags+=("$tag")
         shift 2
         ;;
       --host)
@@ -316,7 +381,12 @@ cmd_snapshot() {
     esac
   done
 
-  _maybe_dispatch_remote "$host" snapshot --tag "$tag" && return
+  _validate_tags "${snapshot_tags[@]}"
+  local -a remote_args=()
+  for tag in "${snapshot_tags[@]}"; do
+    remote_args+=(--tag "$tag")
+  done
+  _maybe_dispatch_remote "$host" snapshot "${remote_args[@]}" && return
   _ensure_btrfs_mounted
   _run_snapshot_hook pre-snapshot || \
     _die "pre-snapshot hook failed; aborting snapshot"
@@ -342,12 +412,14 @@ cmd_snapshot() {
     done
   ) || exit 1
 
-  _write_tag "$snapshot_dir" "$tag"
+  _write_tags "$snapshot_dir" "${snapshot_tags[@]}"
   _info "Setting latest -> ${now}"
   _update_symlink "$now" "${BTRFS_MOUNT_POINT}/${snapshots_subvol}/latest" || true
   _run_snapshot_hook post-snapshot "$snapshot_dir" || \
     _die "post-snapshot hook failed"
-  _info "Created snapshot set: ${now}${tag:+ (tag: ${tag})}"
+  local tag_display
+  tag_display=$(_display_tags "$snapshot_dir")
+  _info "Created snapshot set: ${now}${tag_display:+ (tags: ${tag_display})}"
 }
 
 cmd_list() {
@@ -364,14 +436,14 @@ cmd_list() {
   fi
 
   local -a set_names=() tags=() flags_list=()
-  local host_width=${#HOST_LABEL} set_width=3 tag_width=3 flags_width=5
+  local host_width=${#HOST_LABEL} set_width=3 tag_width=4 flags_width=5
   [ "$host_width" -ge 4 ] || host_width=4
 
   local found=0 d set_name tag flags
   for d in "$snapshots_dir"/*/; do
     set_name=$(basename "$d")
     _is_set_name "$set_name" || continue
-    tag=$(_read_tag "${d%/}")
+    tag=$(_display_tags "${d%/}")
     flags=$(_snapshot_flags "$snapshots_dir" "$set_name")
     set_names+=("$set_name")
     tags+=("$tag")
@@ -384,7 +456,7 @@ cmd_list() {
 
   printf '%s%-*s    %-*s    %-*s    %-*s%s\n' \
     "$OUT_BOLD" "$host_width" "HOST" "$set_width" "SET" \
-    "$tag_width" "TAG" "$flags_width" "FLAGS" "$OUT_RESET"
+    "$tag_width" "TAGS" "$flags_width" "FLAGS" "$OUT_RESET"
   local i
   for i in "${!set_names[@]}"; do
     printf '%-*s    %-*s    %-*s    %-*s\n' \
@@ -458,7 +530,8 @@ cmd_rm() {
 }
 
 cmd_tag() {
-  local host="" set_name="" tag_value="" got_set=0 got_tag=0
+  local host="" set_name action
+  local -a args=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --host)
@@ -469,35 +542,26 @@ cmd_tag() {
         _die "tag: unknown option: $1"
         ;;
       *)
-        if [ "$got_set" -eq 0 ]; then
-          set_name="$1"
-          got_set=1
-        elif [ "$got_tag" -eq 0 ]; then
-          tag_value="$1"
-          got_tag=1
-        else
-          _die "tag: unexpected extra argument: $1"
-        fi
+        args+=("$1")
         shift
         ;;
     esac
   done
-  [ "$got_set" -eq 1 ] || _die "tag: usage: tag SET_ID TAG_NAME"
-  [ "$got_tag" -eq 1 ] || _die "tag: usage: tag SET_ID TAG_NAME (empty string clears the tag)"
+  [ "${#args[@]}" -ge 3 ] || _die "tag: usage: tag SET_ID {add|rm} TAG... [--host HOST]"
+  set_name="${args[0]}"
+  action="${args[1]}"
+  _is_set_name "$set_name" || _die "tag: invalid SET_ID: ${set_name}"
+  _validate_tag_operation tag "$action" "${args[@]:2}"
 
-  _maybe_dispatch_remote "$host" tag "$set_name" "$tag_value" && return
+  _maybe_dispatch_remote "$host" tag "${args[@]}" && return
   _ensure_btrfs_mounted
 
   local snapshots_dir="${BTRFS_MOUNT_POINT}/@snapshots"
   local set_dir="${snapshots_dir}/${set_name}"
   [ -d "$set_dir" ] || _die "no such snapshot set: ${set_dir}"
 
-  _write_tag "$set_dir" "$tag_value"
-  if [ -n "$tag_value" ]; then
-    _info "Tagged ${set_name}: ${tag_value}"
-  else
-    _info "Cleared tag for ${set_name}"
-  fi
+  _modify_tags "$set_dir" "$action" "${args[@]:2}"
+  _info "Tags for ${set_name}: $(_display_tags "$set_dir")"
 }
 
 _require_btrctl_marker() {
@@ -805,7 +869,7 @@ cmd_trunk_list() {
     for d in "$host_dir"/*/; do
       set_name=$(basename "$d")
       _is_set_name "$set_name" || continue
-      tag=$(_read_tag "${d%/}")
+      tag=$(_display_tags "${d%/}")
       set_hosts+=("$trunk_host")
       set_names+=("$set_name")
       tags+=("$tag")
@@ -814,7 +878,7 @@ cmd_trunk_list() {
 
   [ "$host_width" -ge 4 ] || host_width=4
   printf '%s%-*s  %-20s  %s%s\n' \
-    "$OUT_BOLD" "$host_width" "HOST" "SET" "TAG" "$OUT_RESET"
+    "$OUT_BOLD" "$host_width" "HOST" "SET" "TAGS" "$OUT_RESET"
 
   local i previous_host=""
   for i in "${!set_names[@]}"; do
@@ -859,6 +923,27 @@ cmd_trunk_rm() {
   _info "Removed trunk snapshot set: ${host_label}/${set_name}"
 }
 
+cmd_trunk_tag() {
+  [ $# -ge 3 ] || _die "trunk tag: usage: trunk tag HOST/SET_ID {add|rm} TAG..."
+  local arg="$1" action="$2" host_label set_name
+  shift 2
+  host_label="${arg%%/*}"
+  set_name="${arg#*/}"
+  [[ "$arg" = */* ]] && [ -n "$host_label" ] || _die "trunk tag: expected HOST/SET_ID"
+  _is_set_name "$set_name" || _die "trunk tag: invalid SET_ID: ${set_name}"
+  _validate_tag_operation "trunk tag" "$action" "$@"
+  _ensure_trunk_mounted
+
+  local host_dir="${TRUNK_MOUNT_POINT}/@${host_label}"
+  [ -d "$host_dir" ] || _die "no such trunk host: ${host_dir}"
+  _require_btrctl_marker "$host_dir"
+  local set_dir="${host_dir}/${set_name}"
+  [ -d "$set_dir" ] || _die "no such trunk snapshot set: ${set_dir}"
+
+  _modify_tags "$set_dir" "$action" "$@"
+  _info "Tags for ${arg}: $(_display_tags "$set_dir")"
+}
+
 cmd_config() {
   echo "CONF_FILE=${CONF_FILE}"
   echo "CONF_OVERLAY_FILE=${CONF_OVERLAY_FILE}"
@@ -884,17 +969,18 @@ ${c_bold}USAGE:${c_reset}
   ${c_bold}btrctl${c_reset} <command> [options]
 
 ${c_bold}COMMANDS:${c_reset}
-  ${c_bold}snapshot${c_reset} [--tag ${c_var}NAME${c_reset}] [--host ${c_var}HOST${c_reset}]
+  ${c_bold}snapshot${c_reset} [--tag ${c_var}TAG${c_reset} ...] [--host ${c_var}HOST${c_reset}]
   ${c_bold}list${c_reset} [--host ${c_var}HOST${c_reset}]
   ${c_bold}latest${c_reset} [--host ${c_var}HOST${c_reset}]
   ${c_bold}rm${c_reset} ${c_var}SET_NAME${c_reset} [--host ${c_var}HOST${c_reset}]
-  ${c_bold}tag${c_reset} ${c_var}SET_ID${c_reset} ${c_var}TAG_NAME${c_reset} [--host ${c_var}HOST${c_reset}]
+  ${c_bold}tag${c_reset} ${c_var}SET_ID${c_reset} {add|rm} ${c_var}TAG${c_reset}... [--host ${c_var}HOST${c_reset}]
 
   ${c_bold}trunk id${c_reset}
   ${c_bold}trunk backup${c_reset} [${c_var}SET_NAME${c_reset}] [--host ${c_var}HOST${c_reset}]
   ${c_bold}trunk hosts${c_reset}
   ${c_bold}trunk list${c_reset} [${c_var}HOST${c_reset}]
   ${c_bold}trunk rm${c_reset} ${c_var}HOST${c_reset}/${c_var}SET_NAME${c_reset}
+  ${c_bold}trunk tag${c_reset} ${c_var}HOST${c_reset}/${c_var}SET_ID${c_reset} {add|rm} ${c_var}TAG${c_reset}...
 
   ${c_bold}config${c_reset}
   ${c_bold}help${c_reset}, ${c_bold}-h${c_reset}, ${c_bold}--help${c_reset}
@@ -927,6 +1013,7 @@ main() {
         hosts)          shift; cmd_trunk_hosts "$@"  ;;
         list)           shift; cmd_trunk_list "$@"   ;;
         rm)             shift; cmd_trunk_rm "$@"     ;;
+        tag)            shift; cmd_trunk_tag "$@"    ;;
         *) _die "unknown trunk subcommand: ${sub:-<none>}" ;;
       esac ;;
     *) _die "unknown command: ${cmd}" ;;

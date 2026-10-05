@@ -1,4 +1,5 @@
-# btrctl
+btrctl
+======
 
 Btrfs snapshot and trunk backup tool.
 
@@ -19,12 +20,12 @@ ENVIRONMENT:
        sudo elevation that happens when btrctl isn't already running as root.
 
 SOURCE MOUNTS:
-  Commands that access $BTRFS_MOUNT_POINT require it to already be mounted.
-  With --host, the remote host's configured BTRFS_MOUNT_POINT must already be
+  Commands that access $BTRFS_MOUNT_POINT require it to already be mounted. With
+  --host, the remote host's configured BTRFS_MOUNT_POINT must already be
   mounted.
 
 COMMANDS:
-  snapshot [--tag NAME] [--host HOST]
+  snapshot [--tag TAG ...] [--host HOST]
       Take a snapshot set of all configured subvolumes under $BTRFS_MOUNT_POINT.
       If $BTRFS_MOUNT_POINT/.btrctl/pre-snapshot exists and is executable, it is
       run (cwd = $BTRFS_MOUNT_POINT) before snapshotting begins; a non-zero exit
@@ -42,31 +43,39 @@ COMMANDS:
       directories. On trunk, files are owned by the backup process, have mode
       0644, and receive new timestamps; directories have mode 0755.
 
-        --tag NAME          Attach a human-readable tag to this snapshot set
+        --tag TAG           Attach a tag; repeat this option for multiple tags
         --host HOST         Run against HOST instead of the local machine
 
   list [--host HOST]
-      List local snapshot sets: host label, timestamp, tag if present, and FLAGS
-      ("latest" and/or any trunk_<id> this set was last backed up to).
+      List local snapshot sets: host label, timestamp, TAGS if present, and
+      FLAGS ("latest" and/or any trunk_<id> this set was last backed up to).
 
         --host HOST         Run against HOST instead of the local machine
 
   latest [--host HOST]
-      Print just the timestamp ID of the latest local snapshot set, and
-      nothing else -- suitable for capturing in scripts.
+      Print just the timestamp ID of the latest local snapshot set, and nothing
+      else -- suitable for capturing in scripts.
 
         --host HOST         Run against HOST instead of the local machine
 
   rm SET_NAME [--host HOST]
-      Remove a local snapshot set by timestamp name. Prompts for
-      confirmation before deleting. Warns when the set is flagged as latest
-      or by one or more trunk_<id> tracking symlinks.
+      Remove a local snapshot set by timestamp name. Prompts for confirmation
+      before deleting. Warns when the set is flagged as latest or by one or more
+      trunk_<id> tracking symlinks.
 
         --host HOST         Run against HOST instead of the local machine
 
-  tag SET_ID TAG_NAME [--host HOST]
-      Set or update the tag on an existing local snapshot set. An empty
-      TAG_NAME clears the tag.
+  tag SET_ID {add|rm} TAG... [--host HOST]
+      Add or remove one or more tags on an existing local snapshot set. Other
+      tags are preserved. Adding an existing tag or removing an absent tag
+      succeeds without changing the tag list. Removing the final tag removes the
+      tags file.
+
+      Tags are case-sensitive and nonempty. Quote tags containing spaces;
+      embedded newlines are not allowed. Tags are stored one per line in
+      SET_DIR/.btrctl/tags, with duplicates removed and insertion order
+      preserved. Listings use a TAGS heading and comma-separated tags. The old
+      .btrctl/tag file and tag SET_ID TAG_NAME syntax are no longer used.
 
         --host HOST         Run against HOST instead of the local machine
 
@@ -77,39 +86,45 @@ COMMANDS:
 
   trunk backup [SET_NAME] [--host HOST]
       Back up SET_NAME, or the latest snapshot set when omitted, to the
-      currently mounted trunk device. Device opening, closing, and mounting
-      are managed externally.
-      Always runs on the machine trunk is physically attached to.
-      If /trunk/@<HOST_LABEL> does not exist, it is created automatically
-      as a new subvolume, along with a /trunk/@<HOST_LABEL>/.btrctl marker
-      file. If it exists but is not a btrfs subvolume, or exists without
-      the .btrctl marker, aborts with an error (the marker distinguishes
-      btrctl-managed subvolumes from other, unrelated subvolumes that may
-      also live on trunk). To adopt a pre-existing subvolume, manually
-      create an empty .btrctl file inside it.
-      Snapshot-set metadata under .btrctl is copied after subvolume receive.
-      A trunk backup fails if the destination snapshot set already exists.
+      currently mounted trunk device. Device opening, closing, and mounting are
+      managed externally. Always runs on the machine trunk is physically
+      attached to. If /trunk/@<HOST_LABEL> does not exist, it is created
+      automatically as a new subvolume, along with a
+      /trunk/@<HOST_LABEL>/.btrctl marker file. If it exists but is not a btrfs
+      subvolume, or exists without the .btrctl marker, aborts with an error (the
+      marker distinguishes btrctl-managed subvolumes from other, unrelated
+      subvolumes that may also live on trunk). To adopt a pre-existing
+      subvolume, manually create an empty .btrctl file inside it. Snapshot-set
+      metadata under .btrctl is copied after subvolume receive. A trunk backup
+      fails if the destination snapshot set already exists.
 
         --host HOST         Back up HOST's selected snapshot set instead of
-                              the local machine's
+                            the local machine's
 
   trunk hosts
-      Print the HOST_LABEL of each btrctl-managed host directory on trunk,
-      one per line. Directories without a .btrctl marker are skipped.
+      Print the HOST_LABEL of each btrctl-managed host directory on trunk, one
+      per line. Directories without a .btrctl marker are skipped.
 
   trunk list [HOST]
-      List snapshot sets stored on trunk across all hosts. Specify HOST to
-      list only that host. HOST is a HOST_LABEL, not an SSH alias, and no
-      SSH connection is ever made (same as trunk rm's HOST). Automatic
-      discovery skips directories without a .btrctl marker; explicitly
-      listing such a HOST aborts with an error.
+      List snapshot sets stored on trunk across all hosts. Specify HOST to list
+      only that host. HOST is a HOST_LABEL, not an SSH alias, and no SSH
+      connection is ever made (same as trunk rm's HOST). Automatic discovery
+      skips directories without a .btrctl marker; explicitly listing such a HOST
+      aborts with an error.
 
   trunk rm HOST/SET_NAME
-      Remove a snapshot set from trunk. HOST is required and explicit;
-      there is no implicit "local machine" default for this destructive
-      operation. Prompts for confirmation before deleting. Aborts with an
-      error if /trunk/@HOST exists but is missing its .btrctl marker.
-      Removes the entire set directory, including its .btrctl metadata.
+      Remove a snapshot set from trunk. HOST is required and explicit; there is
+      no implicit "local machine" default for this destructive operation.
+      Prompts for confirmation before deleting. Aborts with an error if
+      /trunk/@HOST exists but is missing its .btrctl marker. Removes the entire
+      set directory, including its .btrctl metadata.
+
+  trunk tag HOST/SET_ID {add|rm} TAG...
+      Add or remove tags directly on a trunk snapshot set, using the same
+      semantics as tag. HOST is a stored HOST_LABEL, not an SSH alias. Requires
+      the host directory's .btrctl marker. trunk backup copies tags along with
+      all other set metadata. Later tag changes on the source or trunk are
+      independent and are not synchronized.
 
   config
       Print effective configuration as KEY=value pairs.

@@ -15,11 +15,11 @@ __btrctl_trunk_hosts() {
 
 __btrctl() {
   local cur word i first_arg kind expect="" options="" set_candidates=""
-  local host_seen=0 tag_seen=0 positional_count=0
+  local host_seen=0 positional_count=0
   cur="${COMP_WORDS[COMP_CWORD]}"
 
   local commands="snapshot list latest rm tag trunk config help -h --help"
-  local trunk_commands="id backup hosts list rm"
+  local trunk_commands="id backup hosts list rm tag"
 
   COMPREPLY=()
 
@@ -40,7 +40,8 @@ __btrctl() {
     return
   fi
 
-  if [ "${COMP_WORDS[1]}" = "trunk" ] && [ "${COMP_WORDS[2]}" = "rm" ] &&
+  if [ "${COMP_WORDS[1]}" = "trunk" ] &&
+    [[ "${COMP_WORDS[2]}" = rm || "${COMP_WORDS[2]}" = tag ]] &&
     [ "$COMP_CWORD" -eq 3 ]; then
     [[ "$cur" = -* ]] && return
     COMPREPLY=($(compgen -W "$(__btrctl_trunk_hosts | awk '{ print $0 "/" }')" -- "$cur"))
@@ -66,9 +67,12 @@ __btrctl() {
       kind="tag"
       ;;
     trunk)
-      [ "${COMP_WORDS[2]}" = "backup" ] || return
       first_arg=3
-      kind="trunk-backup"
+      case "${COMP_WORDS[2]}" in
+        backup) kind="trunk-backup" ;;
+        tag) kind="trunk-tag" ;;
+        *) return ;;
+      esac
       ;;
     *) return ;;
   esac
@@ -78,14 +82,16 @@ __btrctl() {
     if [ -n "$expect" ]; then
       case "$expect" in
         host) host_seen=1 ;;
-        tag) tag_seen=1 ;;
       esac
       expect=""
       continue
     fi
 
     case "$word" in
-      --host) expect="host" ;;
+      --host)
+        [ "$kind" != "trunk-tag" ] || return
+        expect="host"
+        ;;
       --tag)
         [ "$kind" = "snapshot" ] || return
         expect="tag"
@@ -114,7 +120,7 @@ __btrctl() {
       ;;
     snapshot)
       [ "$host_seen" -eq 0 ] && options="--host"
-      [ "$tag_seen" -eq 0 ] && options="${options:+${options} }--tag"
+      options="${options:+${options} }--tag"
       ;;
     rm)
       [ "$positional_count" -le 1 ] || return
@@ -124,8 +130,11 @@ __btrctl() {
       fi
       ;;
     tag)
-      [ "$positional_count" -le 2 ] || return
       [ "$host_seen" -eq 0 ] && options="--host"
+      [ "$positional_count" -ne 1 ] || set_candidates="add rm"
+      ;;
+    trunk-tag)
+      [ "$positional_count" -ne 1 ] || set_candidates="add rm"
       ;;
     trunk-backup)
       [ "$positional_count" -le 1 ] || return
