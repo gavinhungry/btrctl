@@ -376,12 +376,17 @@ _run_prune() {
   month_cutoff=$(_prune_month_cutoff "$now") || return 1
   local -a names=() reasons=() delete_paths=()
   local retained=0 deleted=0 skipped=0 total=0 header_shown=0
+  local previous_label=""
   _prune_row() {
     local action="$1" color=""; shift
     [ "$header_shown" -eq 1 ] || {
       printf '%s%-6s  %-20s  %-20s  %s%s\n' "$OUT_BOLD" ACTION HOST SET REASON "$OUT_RESET"
       header_shown=1
     }
+    if [ -n "$previous_label" ] && [ "$1" != "$previous_label" ]; then
+      printf '\n'
+    fi
+    previous_label="$1"
     case "$action" in
       KEEP) color="$OUT_GREEN" ;;
       DELETE) color="$OUT_RED" ;;
