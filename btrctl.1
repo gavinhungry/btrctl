@@ -110,9 +110,34 @@ when necessary.
 Commands that accept
 .B \-\-host
 run the same btrctl command on a remote machine over
-.BR ssh (1);
-the connection is made as the invoking (pre-sudo) user, and the remote side
-prompts for its own sudo password.
+.BR ssh (1)
+as root.
+The connection is made as the invoking (pre-sudo) user, so that user's keys
+and
+.BR ssh_config (5)
+apply.
+btrctl first checks whether
+.BR sudo (8)
+on the remote needs a password; if it does, the password is asked for on the
+local terminal and passed to the remote
+.B sudo
+on its standard input.
+No pseudo-terminal is allocated, so the remote's standard output and standard
+error arrive separately and its output can be captured or piped like a local
+command's.
+Remote
+.B sudo
+must therefore not be configured with
+.BR requiretty .
+.PP
+Remote
+.B rm
+and
+.B prune
+confirm in two steps: the remote first reports what it would delete and stops,
+the question is asked on the local terminal, and only then is the deletion
+run.
+This requires the remote to run the same version of btrctl.
 .
 .SH COMMANDS
 .SS Local snapshot sets
@@ -518,6 +543,9 @@ rule that includes
 .B NO_COLOR
 When set to any non-empty value, disables coloured output.
 Colour is in any case only used when the relevant stream is a terminal.
+Both conditions are evaluated on the local machine and forwarded to remote
+commands run with
+.BR \-\-host .
 .TP
 .B SUDO_USER
 Set by
@@ -610,11 +638,12 @@ $ btrctl tag 2026\-10\-07\-120000 add noprune
 .fi
 .RE
 .PP
-Use the latest set's name in a script:
+Use the latest set's name, local or remote, in a script:
 .PP
 .RS
 .nf
 set=$(btrctl latest)
+remote_set=$(btrctl latest \-\-host db01)
 .fi
 .RE
 .

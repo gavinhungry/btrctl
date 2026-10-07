@@ -36,9 +36,11 @@ Remote hosts
 
 `--host` runs the same `btrctl` command on another machine over SSH. The
 connection is made as the current user (not root), so user SSH keys and
-`ssh_config` apply, and the remote side asks for its own sudo password. `trunk
-backup --host` streams the remote snapshot straight into `btrfs receive` on the
-trunk machine.
+`ssh_config` apply. Remote output comes back as a local command's would, with
+stdout and stderr kept separate, so `set=$(btrctl latest --host db01)` works;
+`rm` and `prune` show what they would delete before asking for confirmation.
+`trunk backup --host` streams the remote snapshot straight into `btrfs receive`
+on the trunk machine.
 
 Retention policy
 ----------------
