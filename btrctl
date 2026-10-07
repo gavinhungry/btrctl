@@ -32,6 +32,7 @@ _stderr_is_tty() { [ "$COLOR_STDERR" -eq 1 ] || [ -t 2 ]; }
 
 _init_colors() {
   OUT_RESET=''
+  OUT_BLACK_PLAIN=''
   OUT_BOLD=''
   OUT_RED=''
   OUT_GREEN=''
@@ -48,6 +49,7 @@ _init_colors() {
 
   if _stdout_is_tty; then
     OUT_RESET=$'\033[0m'
+    OUT_BLACK_PLAIN=$'\033[30m'
     OUT_BOLD=$'\033[1m'
     OUT_RED=$'\033[1;31m'
     OUT_GREEN=$'\033[1;32m'
@@ -549,6 +551,7 @@ _run_prune() {
           latest|trunk_*) token_color="$OUT_CYAN" ;;
           noprune) token_color="$OUT_MAGENTA" ;;
           future) token_color="$OUT_YELLOW" ;;
+          'outside retention policy') token_color="$OUT_BLACK_PLAIN" ;;
           *) token_color="" ;;
         esac
         [ -z "$token_color" ] || token="${token_color}${token}${OUT_RESET}"
