@@ -652,9 +652,19 @@ _remote_sudo() {
   fi
 }
 
+# Quote a string for the remote login shell, which may not be bash: wrap it
+# in single quotes with embedded single quotes written as '\''. Every POSIX
+# shell and fish parse this identically, and tabs, newlines and non-ASCII
+# pass through literally. printf %q is avoided because it emits bash-only
+# $'...' quoting for exactly those characters.
+_shell_quote() {
+  local s="$1"
+  printf "'%s'" "${s//\'/\'\\\'\'}"
+}
+
 _remote_root() {
   local host="$1"; shift
-  _remote_sudo "$host" "sh -c $(printf '%q' "$*")"
+  _remote_sudo "$host" "sh -c $(_shell_quote "$*")"
 }
 
 # Build the btrctl command line to run on HOST. The user's terminal state is
@@ -664,9 +674,9 @@ _remote_root() {
 REMOTE_COLOR_FLAGS=""
 _remote_btrctl_cmd() {
   local host="$1" arg cmd; shift
-  cmd="btrctl --remote-label $(printf '%q' "$host")${REMOTE_COLOR_FLAGS}"
+  cmd="btrctl --remote-label $(_shell_quote "$host")${REMOTE_COLOR_FLAGS}"
   for arg in "$@"; do
-    cmd+=" $(printf '%q' "$arg")"
+    cmd+=" $(_shell_quote "$arg")"
   done
   printf '%s' "$cmd"
 }
