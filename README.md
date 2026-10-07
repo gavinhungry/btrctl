@@ -19,6 +19,21 @@ ENVIRONMENT:
        exist, this is a hard error. Preserved automatically across the automatic
        sudo elevation that happens when btrctl isn't already running as root.
 
+CONFIGURATION:
+  /etc/btrctl.conf sets HOST_LABEL, BTRFS_MOUNT_POINT, SUBVOLUMES and
+  TRUNK_MOUNT_POINT. Because these values are embedded in shell commands run
+  over SSH and used to build paths, they are restricted to a conservative
+  character set and validated before snapshot and trunk backup run:
+
+    HOST_LABEL          A-Z a-z 0-9 . _ -
+    SUBVOLUMES entries  A-Z a-z 0-9 @ . _ + -
+    BTRFS_MOUNT_POINT   absolute path of A-Z a-z 0-9 @ . _ + / - with no ".."
+                        component
+
+  None may be empty, ".", or "..", or begin with "-". The trunk-id marker file
+  follows the HOST_LABEL rules. The same rules are applied to configuration
+  fetched from a remote host with --host.
+
 SOURCE MOUNTS:
   Commands that access $BTRFS_MOUNT_POINT require it to already be mounted. With
   --host, the remote host's configured BTRFS_MOUNT_POINT must already be
@@ -107,6 +122,11 @@ COMMANDS:
       fails if the destination snapshot set already exists. Incremental sends
       use the set tracked by trunk_<id> as parent only when that set still
       exists on both the source and trunk; otherwise a full send is used.
+
+      With --host, the remote's configuration (see CONFIGURATION) and the
+      snapshot set names its latest and trunk_<id> symlinks resolve to are
+      validated before anything is created on trunk; a malformed value aborts
+      the backup.
 
         -H, --host HOST     Back up HOST's selected snapshot set instead of
                             the local machine's

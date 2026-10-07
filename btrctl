@@ -151,6 +151,56 @@ _is_set_name() {
   esac
 }
 
+# Config values are interpolated into single-quoted remote shell strings and
+# used to build filesystem paths, so they are restricted to a conservative
+# character set. These validators print nothing and return 0/1.
+_validate_subvol_name() {
+  case "$1" in
+    ""|.|..|-*) return 1 ;;
+    *[!A-Za-z0-9@._+-]*) return 1 ;;
+  esac
+}
+
+_validate_host_label() {
+  case "$1" in
+    ""|.|..|-*) return 1 ;;
+    *[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+}
+
+_validate_mount_point() {
+  case "$1" in
+    /*) ;;
+    *) return 1 ;;
+  esac
+  case "$1" in
+    *[!A-Za-z0-9@._+/-]*) return 1 ;;
+    ..|../*|*/..|*/../*) return 1 ;;
+  esac
+}
+
+_validate_trunk_id() {
+  case "$1" in
+    ""|.|..|-*) return 1 ;;
+    *[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+}
+
+# Validate a source host's HOST_LABEL, BTRFS_MOUNT_POINT and SUBVOLUMES,
+# whether from local config or fetched from a remote. CONTEXT prefixes errors.
+_validate_source_config() {
+  local context="$1" label="$2" mount_point="$3" subvol; shift 3
+  _validate_host_label "$label" || \
+    _die "${context}: invalid HOST_LABEL: '${label}' (allowed: A-Z a-z 0-9 . _ -; must not begin with '-')"
+  _validate_mount_point "$mount_point" || \
+    _die "${context}: invalid BTRFS_MOUNT_POINT: '${mount_point}' (must be an absolute path using A-Z a-z 0-9 @ . _ + / -, without '..')"
+  [ $# -gt 0 ] || _die "${context}: SUBVOLUMES must not be empty"
+  for subvol in "$@"; do
+    _validate_subvol_name "$subvol" || \
+      _die "${context}: invalid SUBVOLUMES entry: '${subvol}' (allowed: A-Z a-z 0-9 @ . _ + -; must not begin with '-')"
+  done
+}
+
 _validate_tags() {
   local tag
   for tag in "$@"; do
@@ -537,11 +587,23 @@ _remote_config() {
     esac
   done <<< "$raw"
 
-  [ -n "$subvolumes_line" ] && eval "REMOTE_SUBVOLUMES=${subvolumes_line}"
-
   [ -n "$REMOTE_HOST_LABEL" ] || _die "could not determine HOST_LABEL from ${host}"
   [ -n "$REMOTE_BTRFS_MOUNT_POINT" ] || _die "could not determine BTRFS_MOUNT_POINT from ${host}"
-  [ "${#REMOTE_SUBVOLUMES[@]}" -gt 0 ] || _die "could not determine SUBVOLUMES from ${host}"
+  [ -n "$subvolumes_line" ] || _die "could not determine SUBVOLUMES from ${host}"
+
+  # The remote output is untrusted: parse the "(a b c)" form by word
+  # splitting only, never eval, and validate every value before use.
+  case "$subvolumes_line" in
+    "("*")")
+      subvolumes_line="${subvolumes_line#\(}"
+      subvolumes_line="${subvolumes_line%\)}"
+      ;;
+    *) _die "malformed SUBVOLUMES from ${host}: ${subvolumes_line}" ;;
+  esac
+  read -ra REMOTE_SUBVOLUMES <<< "$subvolumes_line"
+
+  _validate_source_config "config from ${host}" \
+    "$REMOTE_HOST_LABEL" "$REMOTE_BTRFS_MOUNT_POINT" "${REMOTE_SUBVOLUMES[@]}"
 }
 
 _consume_opt_value() {
@@ -603,6 +665,7 @@ cmd_snapshot() {
   done
   _maybe_dispatch_remote "$host" snapshot "${remote_args[@]}"
   _ensure_btrfs_mounted
+  _validate_source_config config "$HOST_LABEL" "$BTRFS_MOUNT_POINT" "${SUBVOLUMES[@]}"
   _run_snapshot_hook pre-snapshot || \
     _die "pre-snapshot hook failed; aborting snapshot"
 
@@ -823,6 +886,8 @@ _trunk_id() {
   local trunk_id
   trunk_id=$(cat "$trunk_id_file")
   [ -n "$trunk_id" ] || _die "${trunk_id_file} is empty"
+  _validate_trunk_id "$trunk_id" || \
+    _die "${trunk_id_file} contains an invalid trunk id: '${trunk_id}' (allowed: A-Z a-z 0-9 . _ -; must not begin with '-')"
   echo "$trunk_id"
 }
 
@@ -934,6 +999,7 @@ _trunk_backup() {
       _die "${REMOTE_BTRFS_MOUNT_POINT} is not mounted on ${host}"
   else
     _ensure_btrfs_mounted
+    _validate_source_config config "$HOST_LABEL" "$BTRFS_MOUNT_POINT" "${SUBVOLUMES[@]}"
     label="$HOST_LABEL"
     snapshots_dir="${BTRFS_MOUNT_POINT}/@snapshots"
     subvols=("${SUBVOLUMES[@]}")
@@ -970,6 +1036,8 @@ _trunk_backup() {
     [ -n "$resolved_latest" ] || _die "$err_no_latest"
     _src_run "test -d '${resolved_latest}'" || _die "$err_latest_dangling"
     set_timestamp=$(basename "$resolved_latest")
+    _is_set_name "$set_timestamp" || \
+      _die "latest symlink${host:+ on ${host}} resolves to an invalid snapshot set name: ${set_timestamp}"
   fi
 
   local parent_timestamp=""
@@ -978,6 +1046,8 @@ _trunk_backup() {
     resolved_parent=$(_src_run "readlink -f '${parent_link}'" 2>/dev/null || true)
     if [ -n "$resolved_parent" ] && _src_run "test -d '${resolved_parent}'"; then
       parent_timestamp=$(basename "$resolved_parent")
+      _is_set_name "$parent_timestamp" || \
+        _die "trunk_${trunk_id} symlink${host:+ on ${host}} resolves to an invalid snapshot set name: ${parent_timestamp}"
     else
       _die "$err_parent_dangling"
     fi
