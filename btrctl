@@ -573,14 +573,15 @@ _remote_sudo_prompt() {
   printf '%s[remote sudo]%s password for %s: ' "$m" "$r" "$host"
 }
 
+# HOST is always passed after "--" so it can never be taken as an ssh option.
 _ssh() {
   local host="$1"; shift
-  $SSH "$host" "$@"
+  $SSH -- "$host" "$@"
 }
 
 _ssh_tty() {
   local host="$1"; shift
-  $SSH -t "$host" "$@"
+  $SSH -t -- "$host" "$@"
 }
 
 _dispatch_remote() {
@@ -647,6 +648,16 @@ _consume_opt_value() {
   _out="$2"
 }
 
+# Consume -H/--host. The value is an ssh destination; reject anything that
+# could be mistaken for a flag or that would silently mean "local".
+_consume_host_opt() {
+  local varname="$1"; shift
+  local -n _host_out="$varname"
+  _consume_opt_value "$varname" "$@"
+  [ -n "$_host_out" ] || _die "$1 must not be empty"
+  [[ "$_host_out" != -* ]] || _die "$1: invalid HOST: ${_host_out}"
+}
+
 _parse_host_only_args() {
   local cmd_name="$1" varname="$2"; shift 2
   local -n _out="$varname"
@@ -654,7 +665,7 @@ _parse_host_only_args() {
   while [ $# -gt 0 ]; do
     case "$1" in
       -H|--host)
-        _consume_opt_value "$varname" "$@"
+        _consume_host_opt "$varname" "$@"
         shift 2
         ;;
       *)
@@ -684,7 +695,7 @@ cmd_snapshot() {
         shift 2
         ;;
       -H|--host)
-        _consume_opt_value host "$@"
+        _consume_host_opt host "$@"
         shift 2
         ;;
       *)
@@ -785,8 +796,7 @@ cmd_prune() {
   while [ $# -gt 0 ]; do
     case "$1" in
       -H|--host)
-        _consume_opt_value host "$@"
-        [ -n "$host" ] || _die "prune: $1 must not be empty"
+        _consume_host_opt host "$@"
         shift 2
         ;;
       -n|--dry-run) dry_run=1; shift ;;
@@ -821,7 +831,7 @@ cmd_rm() {
   while [ $# -gt 0 ]; do
     case "$1" in
       -H|--host)
-        _consume_opt_value host "$@"
+        _consume_host_opt host "$@"
         shift 2
         ;;
       -*)
@@ -871,7 +881,7 @@ cmd_tag() {
   while [ $# -gt 0 ]; do
     case "$1" in
       -H|--host)
-        _consume_opt_value host "$@"
+        _consume_host_opt host "$@"
         shift 2
         ;;
       -*)
@@ -940,7 +950,7 @@ cmd_trunk_backup() {
   while [ $# -gt 0 ]; do
     case "$1" in
       -H|--host)
-        _consume_opt_value host "$@"
+        _consume_host_opt host "$@"
         shift 2
         ;;
       -*)
