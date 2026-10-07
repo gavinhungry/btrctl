@@ -93,19 +93,19 @@ __btrctl() {
     fi
 
     case "$word" in
-      --host)
+      -H|--host)
         [[ "$kind" != trunk-tag && "$kind" != trunk-prune ]] || return
         expect="host"
         ;;
-      --dry-run)
+      -n|--dry-run)
         [[ "$kind" = prune || "$kind" = trunk-prune ]] || return
         dry_run_seen=1
         ;;
-      --all)
+      -a|--all)
         [ "$kind" = "trunk-prune" ] && [ "$positional_count" -eq 0 ] || return
         all_seen=1
         ;;
-      --tag)
+      -t|--tag)
         [ "$kind" = "snapshot" ] || return
         expect="tag"
         ;;

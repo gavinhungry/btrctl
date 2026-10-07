@@ -512,7 +512,7 @@ _parse_host_only_args() {
   _out=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --host)
+      -H|--host)
         _consume_opt_value "$varname" "$@"
         shift 2
         ;;
@@ -537,12 +537,12 @@ cmd_snapshot() {
   local -a snapshot_tags=()
   while [ $# -gt 0 ]; do
     case "$1" in
-      --tag)
+      -t|--tag)
         _consume_opt_value tag "$@"
         snapshot_tags+=("$tag")
         shift 2
         ;;
-      --host)
+      -H|--host)
         _consume_opt_value host "$@"
         shift 2
         ;;
@@ -641,12 +641,12 @@ cmd_prune() {
   local host="" dry_run=0
   while [ $# -gt 0 ]; do
     case "$1" in
-      --host)
+      -H|--host)
         _consume_opt_value host "$@"
-        [ -n "$host" ] || _die "prune: --host must not be empty"
+        [ -n "$host" ] || _die "prune: $1 must not be empty"
         shift 2
         ;;
-      --dry-run) dry_run=1; shift ;;
+      -n|--dry-run) dry_run=1; shift ;;
       *) _die "prune: unknown argument: $1" ;;
     esac
   done
@@ -677,7 +677,7 @@ cmd_rm() {
   local host="" set_name=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --host)
+      -H|--host)
         _consume_opt_value host "$@"
         shift 2
         ;;
@@ -727,7 +727,7 @@ cmd_tag() {
   local -a args=()
   while [ $# -gt 0 ]; do
     case "$1" in
-      --host)
+      -H|--host)
         _consume_opt_value host "$@"
         shift 2
         ;;
@@ -740,7 +740,7 @@ cmd_tag() {
         ;;
     esac
   done
-  [ "${#args[@]}" -ge 3 ] || _die "tag: usage: tag SET_ID {add|rm} TAG... [--host HOST]"
+  [ "${#args[@]}" -ge 3 ] || _die "tag: usage: tag SET_ID {add|rm} TAG... [-H|--host HOST]"
   set_name="${args[0]}"
   action="${args[1]}"
   _is_set_name "$set_name" || _die "tag: invalid SET_ID: ${set_name}"
@@ -794,7 +794,7 @@ cmd_trunk_backup() {
   local host="" set_name=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --host)
+      -H|--host)
         _consume_opt_value host "$@"
         shift 2
         ;;
@@ -1033,7 +1033,7 @@ cmd_trunk_list() {
 
   local requested_label="${1:-}"
   case "$requested_label" in
-    --*) _die "trunk list: HOST is a positional argument, not a flag" ;;
+    -*) _die "trunk list: HOST is a positional argument, not a flag" ;;
   esac
 
   _ensure_trunk_mounted
@@ -1102,8 +1102,8 @@ cmd_trunk_prune() {
   local -a host_dirs=()
   while [ $# -gt 0 ]; do
     case "$1" in
-      --all) all=1; shift ;;
-      --dry-run) dry_run=1; shift ;;
+      -a|--all) all=1; shift ;;
+      -n|--dry-run) dry_run=1; shift ;;
       -*) _die "trunk prune: unknown option: $1" ;;
       *)
         [ -z "$requested_label" ] || _die "trunk prune: unexpected extra argument: $1"
@@ -1117,9 +1117,9 @@ cmd_trunk_prune() {
     esac
   done
   if [ "$all" -eq 1 ]; then
-    [ -z "$requested_label" ] || _die "trunk prune: HOST and --all are mutually exclusive"
+    [ -z "$requested_label" ] || _die "trunk prune: HOST and -a|--all are mutually exclusive"
   else
-    [ -n "$requested_label" ] || _die "trunk prune: usage: trunk prune {HOST|--all} [--dry-run]"
+    [ -n "$requested_label" ] || _die "trunk prune: usage: trunk prune {HOST|-a|--all} [-n|--dry-run]"
   fi
   _ensure_trunk_mounted
   if [ "$all" -eq 1 ]; then
@@ -1209,18 +1209,18 @@ ${c_bold}USAGE:${c_reset}
   ${c_bold}btrctl${c_reset} <command> [options]
 
 ${c_bold}COMMANDS:${c_reset}
-  ${c_bold}snapshot${c_reset} [--tag ${c_var}TAG${c_reset} ...] [--host ${c_var}HOST${c_reset}]
-  ${c_bold}list${c_reset} [--host ${c_var}HOST${c_reset}]
-  ${c_bold}prune${c_reset} [--host ${c_var}HOST${c_reset}] [--dry-run]
-  ${c_bold}latest${c_reset} [--host ${c_var}HOST${c_reset}]
-  ${c_bold}rm${c_reset} ${c_var}SET_NAME${c_reset} [--host ${c_var}HOST${c_reset}]
-  ${c_bold}tag${c_reset} ${c_var}SET_ID${c_reset} {add|rm} ${c_var}TAG${c_reset}... [--host ${c_var}HOST${c_reset}]
+  ${c_bold}snapshot${c_reset} [-t|--tag ${c_var}TAG${c_reset} ...] [-H|--host ${c_var}HOST${c_reset}]
+  ${c_bold}list${c_reset} [-H|--host ${c_var}HOST${c_reset}]
+  ${c_bold}prune${c_reset} [-H|--host ${c_var}HOST${c_reset}] [-n|--dry-run]
+  ${c_bold}latest${c_reset} [-H|--host ${c_var}HOST${c_reset}]
+  ${c_bold}rm${c_reset} ${c_var}SET_NAME${c_reset} [-H|--host ${c_var}HOST${c_reset}]
+  ${c_bold}tag${c_reset} ${c_var}SET_ID${c_reset} {add|rm} ${c_var}TAG${c_reset}... [-H|--host ${c_var}HOST${c_reset}]
 
   ${c_bold}trunk id${c_reset}
-  ${c_bold}trunk backup${c_reset} [${c_var}SET_NAME${c_reset}] [--host ${c_var}HOST${c_reset}]
+  ${c_bold}trunk backup${c_reset} [${c_var}SET_NAME${c_reset}] [-H|--host ${c_var}HOST${c_reset}]
   ${c_bold}trunk hosts${c_reset}
   ${c_bold}trunk list${c_reset} [${c_var}HOST${c_reset}]
-  ${c_bold}trunk prune${c_reset} {${c_var}HOST${c_reset}|--all} [--dry-run]
+  ${c_bold}trunk prune${c_reset} {${c_var}HOST${c_reset}|-a|--all} [-n|--dry-run]
   ${c_bold}trunk rm${c_reset} ${c_var}HOST${c_reset}/${c_var}SET_NAME${c_reset}
   ${c_bold}trunk tag${c_reset} ${c_var}HOST${c_reset}/${c_var}SET_ID${c_reset} {add|rm} ${c_var}TAG${c_reset}...
 

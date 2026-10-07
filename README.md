@@ -25,7 +25,7 @@ SOURCE MOUNTS:
   mounted.
 
 COMMANDS:
-  snapshot [--tag TAG ...] [--host HOST]
+  snapshot [-t|--tag TAG ...] [-H|--host HOST]
       Take a snapshot set of all configured subvolumes under $BTRFS_MOUNT_POINT.
       If $BTRFS_MOUNT_POINT/.btrctl/pre-snapshot exists and is executable, it is
       run (cwd = $BTRFS_MOUNT_POINT) before snapshotting begins; a non-zero exit
@@ -43,16 +43,16 @@ COMMANDS:
       directories. On trunk, files are owned by the backup process, have mode
       0644, and receive new timestamps; directories have mode 0755.
 
-        --tag TAG           Attach a tag; repeat this option for multiple tags
-        --host HOST         Run against HOST instead of the local machine
+        -t, --tag TAG       Attach a tag; repeat this option for multiple tags
+        -H, --host HOST     Run against HOST instead of the local machine
 
-  list [--host HOST]
+  list [-H|--host HOST]
       List local snapshot sets: host label, timestamp, TAGS if present, and
       FLAGS ("latest" and/or any trunk_<id> this set was last backed up to).
 
-        --host HOST         Run against HOST instead of the local machine
+        -H, --host HOST     Run against HOST instead of the local machine
 
-  prune [--host HOST] [--dry-run]
+  prune [-H|--host HOST] [-n|--dry-run]
       Prune local snapshot sets using the retention policy below. Always keeps
       sets targeted by latest or any current trunk_* pointer, and sets tagged
       noprune. Uses the local clock/timezone, or HOST's when run remotely.
@@ -60,20 +60,20 @@ COMMANDS:
       failure. --dry-run shows retained sets and reasons without deleting or
       prompting. Protections are checked again immediately before deletion.
 
-  latest [--host HOST]
+  latest [-H|--host HOST]
       Print just the timestamp ID of the latest local snapshot set, and nothing
       else -- suitable for capturing in scripts.
 
-        --host HOST         Run against HOST instead of the local machine
+        -H, --host HOST     Run against HOST instead of the local machine
 
-  rm SET_NAME [--host HOST]
+  rm SET_NAME [-H|--host HOST]
       Remove a local snapshot set by timestamp name. Prompts for confirmation
       before deleting. Warns when the set is flagged as latest or by one or more
       trunk_<id> tracking symlinks.
 
-        --host HOST         Run against HOST instead of the local machine
+        -H, --host HOST     Run against HOST instead of the local machine
 
-  tag SET_ID {add|rm} TAG... [--host HOST]
+  tag SET_ID {add|rm} TAG... [-H|--host HOST]
       Add or remove one or more tags on an existing local snapshot set. Other
       tags are preserved. Adding an existing tag or removing an absent tag
       succeeds without changing the tag list. Removing the final tag removes the
@@ -85,14 +85,14 @@ COMMANDS:
       order preserved. Listings use a TAGS heading and comma-separated tags. The
       old .btrctl/tag file and tag SET_ID TAG_NAME syntax are no longer used.
 
-        --host HOST         Run against HOST instead of the local machine
+        -H, --host HOST     Run against HOST instead of the local machine
 
   trunk id
       Print the currently mounted trunk device's short identifier (the
       $TRUNK_MOUNT_POINT/.btrctl/trunk-id marker file content used in trunk_<id>
       tracking symlinks), e.g. "a".
 
-  trunk backup [SET_NAME] [--host HOST]
+  trunk backup [SET_NAME] [-H|--host HOST]
       Back up SET_NAME, or the latest snapshot set when omitted, to the
       currently mounted trunk device. Device opening, closing, and mounting are
       managed externally. Always runs on the machine trunk is physically
@@ -108,7 +108,7 @@ COMMANDS:
       use the set tracked by trunk_<id> as parent only when that set still
       exists on both the source and trunk; otherwise a full send is used.
 
-        --host HOST         Back up HOST's selected snapshot set instead of
+        -H, --host HOST     Back up HOST's selected snapshot set instead of
                             the local machine's
 
   trunk hosts
@@ -122,7 +122,7 @@ COMMANDS:
       skips directories without a .btrctl marker; explicitly listing such a HOST
       aborts with an error.
 
-  trunk prune {HOST|--all} [--dry-run]
+  trunk prune {HOST|-a|--all} [-n|--dry-run]
       Prune one trunk HOST, or all btrctl-managed hosts with --all. HOST is a
       stored HOST_LABEL, not an SSH alias. A scope is required; HOST and --all
       cannot be combined. Retention is independent per host, using the attached
