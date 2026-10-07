@@ -1,0 +1,618 @@
+.TH BTRCTL 1 "October 2026" "btrctl" "User Commands"
+.
+.SH NAME
+btrctl \- Btrfs snapshot and trunk backup tool
+.
+.SH SYNOPSIS
+.B btrctl snapshot
+.RB [ \-t | \-\-tag
+.IR TAG ...]\&
+.RB [ \-H | \-\-host
+.IR HOST ]
+.br
+.B btrctl list
+.RB [ \-H | \-\-host
+.IR HOST ]
+.br
+.B btrctl prune
+.RB [ \-H | \-\-host
+.IR HOST ]
+.RB [ \-n | \-\-dry\-run ]
+.br
+.B btrctl latest
+.RB [ \-H | \-\-host
+.IR HOST ]
+.br
+.B btrctl rm
+.I SET_NAME
+.RB [ \-H | \-\-host
+.IR HOST ]
+.br
+.B btrctl tag
+.I SET_NAME
+.RB { add | rm }
+.IR TAG ...\&
+.RB [ \-H | \-\-host
+.IR HOST ]
+.PP
+.B btrctl trunk id
+.br
+.B btrctl trunk backup
+.RI [ SET_NAME ]
+.RB [ \-H | \-\-host
+.IR HOST ]
+.br
+.B btrctl trunk hosts
+.br
+.B btrctl trunk list
+.RI [ HOST ]
+.br
+.B btrctl trunk prune
+.RI { HOST | \fB\-a\fR | \fB\-\-all\fR }
+.RB [ \-n | \-\-dry\-run ]
+.br
+.B btrctl trunk rm
+.IR HOST / SET_NAME
+.br
+.B btrctl trunk tag
+.IR HOST / SET_NAME
+.RB { add | rm }
+.IR TAG ...
+.PP
+.B btrctl config
+.br
+.B btrctl
+.RB { help | \-h | \-\-help }
+.
+.SH DESCRIPTION
+.B btrctl
+takes read-only snapshots of a set of btrfs subvolumes and backs them up,
+using
+.BR btrfs-send (8)
+and
+.BR btrfs-receive (8),
+to a separately mounted btrfs device called the
+.IR trunk .
+.PP
+A
+.I snapshot set
+is a directory named after the time it was taken, in the form
+.BR YYYY\-MM\-DD\-HHMMSS ,
+under
+.IR BTRFS_MOUNT_POINT /@snapshots.
+It contains one read-only snapshot per configured subvolume, named
+.BI \%@snapshot\- TIMESTAMP \- HOST_LABEL \- SUBVOLUME\fR,
+and an optional
+.B .btrctl
+directory holding set metadata such as tags.
+Two kinds of symlink live beside the sets:
+.B latest
+points at the most recently created set, and each
+.BI trunk_ ID
+points at the set most recently backed up to the trunk device with that
+identifier.
+The
+.B trunk_
+links let later backups be sent incrementally.
+.PP
+On the trunk, each source host has its own subvolume,
+.IR TRUNK_MOUNT_POINT /@ HOST_LABEL ,
+marked with an empty
+.B .btrctl
+file so that btrctl-managed subvolumes can be told apart from anything else
+on the device.
+Received sets are stored under it using the same directory layout as the
+source.
+.PP
+Most commands need root and re-execute themselves through
+.BR sudo (8)
+when necessary.
+Commands that accept
+.B \-\-host
+run the same btrctl command on a remote machine over
+.BR ssh (1);
+the connection is made as the invoking (pre-sudo) user, and the remote side
+prompts for its own sudo password.
+.
+.SH COMMANDS
+.SS Local snapshot sets
+.TP
+.B snapshot \fR[\fB\-t\fR|\fB\-\-tag\fR \fITAG\fR ...] [\fB\-H\fR|\fB\-\-host\fR \fIHOST\fR]
+Take a snapshot set of all configured subvolumes under
+.IR BTRFS_MOUNT_POINT ,
+then point
+.B latest
+at it.
+Hooks may run before and after; see
+.BR HOOKS .
+.RS
+.TP
+.B \-t\fR, \fB\-\-tag \fITAG
+Attach a tag to the new set.
+Repeat for multiple tags.
+.TP
+.B \-H\fR, \fB\-\-host \fIHOST
+Run on
+.I HOST
+instead of the local machine.
+.RE
+.TP
+.B list \fR[\fB\-H\fR|\fB\-\-host\fR \fIHOST\fR]
+List snapshot sets as a table of host label, set name, tags, and flags.
+Flags are
+.B latest
+and any
+.BI trunk_ ID
+whose symlink points at the set.
+.TP
+.B prune \fR[\fB\-H\fR|\fB\-\-host\fR \fIHOST\fR] [\fB\-n\fR|\fB\-\-dry\-run\fR]
+Delete snapshot sets that fall outside the retention policy (see
+.BR "RETENTION POLICY" ).
+Sets pointed to by
+.B latest
+or any
+.BI trunk_ ID
+symlink, and sets tagged
+.BR noprune ,
+are always kept.
+The plan is printed as a table, then a single confirmation is requested for
+the whole batch.
+Each set's protections are re-checked immediately before it is deleted, and
+the command stops at the first deletion failure.
+.RS
+.TP
+.BR \-n ", " \-\-dry\-run
+Print the full plan, including kept sets and the reason each is kept, without
+deleting anything or prompting.
+.RE
+.TP
+.B latest \fR[\fB\-H\fR|\fB\-\-host\fR \fIHOST\fR]
+Print the name of the set that
+.B latest
+points to, and nothing else.
+.TP
+.B rm \fISET_NAME\fR [\fB\-H\fR|\fB\-\-host\fR \fIHOST\fR]
+Delete one snapshot set after confirmation.
+A warning is printed first if the set is the current
+.B latest
+or is tracked by any
+.BI trunk_ ID
+link.
+If
+.B latest
+pointed at the removed set, it is moved to the next most recent set.
+.TP
+.B tag \fISET_NAME\fR {\fBadd\fR|\fBrm\fR} \fITAG\fR... [\fB\-H\fR|\fB\-\-host\fR \fIHOST\fR]
+Add or remove tags on an existing set.
+Other tags are preserved; adding a tag that is already present or removing one
+that is absent succeeds without change.
+Removing the final tag removes the tags file.
+.IP
+Tags are case-sensitive, must be non-empty, may not begin with
+.RB \(lq \- \(rq,
+and may not contain commas or newlines.
+They are stored one per line in
+.IR SET_DIR /.btrctl/tags,
+de-duplicated, in insertion order.
+The tag
+.B noprune
+is special: see
+.BR prune .
+.
+.SS Trunk
+These commands always run on the machine the trunk device is attached to and
+never make an SSH connection.
+Where they take a
+.IR HOST ,
+it is a stored
+.IR HOST_LABEL ,
+not an SSH host name.
+.TP
+.B trunk id
+Print the mounted trunk device's identifier, read from
+.IR TRUNK_MOUNT_POINT /.btrctl/trunk\-id.
+This is the
+.I ID
+in
+.BI trunk_ ID
+tracking links.
+.TP
+.B trunk backup \fR[\fISET_NAME\fR] [\fB\-H\fR|\fB\-\-host\fR \fIHOST\fR]
+Send
+.IR SET_NAME ,
+or the set
+.B latest
+points to when omitted, to the trunk.
+With
+.BR \-\-host ,
+the set is read from
+.I HOST
+over SSH and received locally.
+.IP
+If
+.IR TRUNK_MOUNT_POINT /@ HOST_LABEL
+does not exist it is created as a new subvolume with a
+.B .btrctl
+marker file.
+If it exists but is not a subvolume, or lacks the marker, the backup is
+refused; to adopt a pre-existing subvolume, create an empty
+.B .btrctl
+file inside it.
+A backup is also refused if the destination set already exists.
+.IP
+When the source's
+.BI trunk_ ID
+link points at an older set that still exists on both the source and the
+trunk, that set is used as the parent for an incremental send; otherwise a
+full send is used.
+After a successful backup the set's
+.B .btrctl
+metadata is copied (regular files and directories only; files become mode 0644
+and directories 0755, owned by root, with fresh timestamps) and the source's
+.BI trunk_ ID
+link is updated.
+.IP
+Values obtained from a remote host, namely its configuration and the set names
+its
+.B latest
+and
+.BI trunk_ ID
+links resolve to, are validated before anything is created on the trunk; see
+.BR \%CONFIGURATION .
+.TP
+.B trunk hosts
+Print the
+.I HOST_LABEL
+of every btrctl-managed host subvolume on the trunk, one per line.
+Subvolumes without a
+.B .btrctl
+marker are skipped.
+.TP
+.B trunk list \fR[\fIHOST\fR]
+List the sets stored on the trunk, for every managed host or for
+.I HOST
+only.
+Naming a
+.I HOST
+whose subvolume lacks the marker is an error.
+.TP
+.B trunk prune \fR{\fIHOST\fR|\fB\-a\fR|\fB\-\-all\fR} [\fB\-n\fR|\fB\-\-dry\-run\fR]
+Apply the retention policy to one host's sets on the trunk, or to every
+managed host with
+.BR \-\-all .
+Exactly one of the two must be given.
+Retention is evaluated independently per host using the trunk machine's
+clock.
+Sets tagged
+.B noprune
+are kept; there are no
+.B latest
+or
+.BI trunk_ ID
+protections on the trunk.
+Confirmation and
+.B \-\-dry\-run
+behave as for
+.BR prune .
+.TP
+.B trunk rm \fIHOST\fB/\fISET_NAME
+Delete one set from the trunk after confirmation, including its
+.B .btrctl
+metadata.
+.I HOST
+is required; there is no local-machine default.
+.TP
+.B trunk tag \fIHOST\fB/\fISET_NAME\fR {\fBadd\fR|\fBrm\fR} \fITAG\fR...
+Add or remove tags on a set stored on the trunk, with the same rules as
+.BR tag .
+Tags on the trunk and on the source are independent after the backup copies
+them.
+.
+.SS Other
+.TP
+.B config
+Print the effective configuration as
+.IB KEY = VALUE
+lines.
+This is also what a remote host is asked for when
+.B trunk backup \-\-host
+needs its configuration.
+.TP
+.BR help ", " \-h ", " \-\-help
+Print a summary of commands.
+.
+.SH HOOKS
+Two optional executables under
+.IR BTRFS_MOUNT_POINT /.btrctl
+are run by
+.BR snapshot .
+Both run as root with
+.I BTRFS_MOUNT_POINT
+as their working directory and in their environment.
+A file that exists but is not executable is skipped with a warning.
+.TP
+.B pre\-snapshot
+Runs before any subvolume is snapshotted.
+A non-zero exit aborts the command before anything is created.
+.TP
+.B post\-snapshot
+Runs after the set and the
+.B latest
+link have been created, with the additional variable
+.B SNAPSHOT_DIR
+set to the absolute path of the new set.
+Anything the hook wants carried along by
+.B trunk backup
+should be written under
+.IR SNAPSHOT_DIR /.btrctl.
+A non-zero exit makes btrctl exit with an error, but the set is left in place
+and must be cleaned up by hand.
+.
+.SH RETENTION POLICY
+.B prune
+and
+.B trunk prune
+keep the union of:
+.IP \(bu 3
+every set from the last 24 hours (reason
+.BR recent );
+.IP \(bu
+the newest set in each hour, for 72 hours
+.RB ( hourly );
+.IP \(bu
+the newest set in each day, for 7 days
+.RB ( daily );
+.IP \(bu
+the newest set in each Sunday-start week, for 4 weeks
+.RB ( weekly );
+.IP \(bu
+the newest set in each calendar month, for 12 months
+.RB ( monthly );
+.IP \(bu
+the newest set in each calendar year, forever
+.RB ( yearly ).
+.PP
+Protected sets (those pointed to by
+.BR latest ,
+.BI trunk_ ID\fR,
+or tagged
+.BR \%noprune )
+still count as the newest in their buckets, so protecting a set can cause an
+unprotected neighbour to be pruned.
+Everything else is deleted, whole sets at a time including their metadata.
+.PP
+Age and bucket membership come from the set's directory name alone.
+Hours, days and weeks are measured as elapsed time from the moment the command
+starts; the 12-month window ends at the same local date and time one year
+earlier (February 29 clamps to February 28, and a time that falls in a
+daylight-saving gap moves forward through it).
+Each window includes its cutoff instant.
+Sets dated in the future are kept with reason
+.BR future .
+Directories whose names are not valid timestamps are skipped with a warning.
+.
+.SH CONFIGURATION
+Configuration is read from
+.I /etc/btrctl.conf
+if it exists, then from the file named by
+.B BTRCTL_CONF
+if set (see
+.BR ENVIRONMENT ).
+Both are sourced as shell scripts.
+The variables are:
+.TP
+.B HOST_LABEL
+Name used for this machine in snapshot names, on the trunk, and in listings.
+Default: the output of
+.BR hostname (1).
+.TP
+.B BTRFS_MOUNT_POINT
+Mount point of the btrfs file system that holds the subvolumes to snapshot.
+The
+.B @snapshots
+directory is created under it.
+It must already be mounted when a command needs it.
+Default:
+.IR /btrfs .
+.TP
+.B SUBVOLUMES
+Bash array of subvolume names, relative to
+.IR BTRFS_MOUNT_POINT ,
+to include in each set.
+Default:
+.BR (@) .
+.TP
+.B TRUNK_MOUNT_POINT
+Mount point of the trunk device.
+Mounting and unmounting it is not btrctl's job.
+Default:
+.IR /trunk .
+.PP
+Because these values are embedded in shell commands run over SSH and used to
+build paths, they are restricted to a conservative character set and checked
+before
+.B snapshot
+and
+.B trunk backup
+do any work.
+The same checks are applied to configuration fetched from a remote host.
+.TP
+.B HOST_LABEL
+Letters, digits,
+.BR . ,
+.BR _ ,
+.BR \- .
+.TP
+.B SUBVOLUMES
+Letters, digits,
+.BR @ ,
+.BR . ,
+.BR _ ,
+.BR + ,
+.BR \- .
+.TP
+.B BTRFS_MOUNT_POINT
+An absolute path made of letters, digits,
+.BR @ ,
+.BR . ,
+.BR _ ,
+.BR + ,
+.BR / ,
+.BR \- ,
+with no
+.B ..
+component.
+.PP
+None of them may be empty,
+.BR . ,
+or
+.BR .. ,
+or begin with
+.BR \- .
+The trunk identifier follows the
+.B HOST_LABEL
+rules.
+.
+.SH ENVIRONMENT
+.TP
+.B BTRCTL_CONF
+Path to an overlay configuration file, sourced after
+.IR /etc/btrctl.conf .
+Variables it sets override the base configuration; anything it leaves unset
+is inherited.
+This allows a second, independent btrfs pool on the same machine to have its
+own
+.BR HOST_LABEL ,
+.B BTRFS_MOUNT_POINT
+and
+.B SUBVOLUMES
+while sharing
+.BR TRUNK_MOUNT_POINT .
+The variable is carried across the automatic sudo re-execution.
+If it is set and the file does not exist, btrctl exits with an error.
+.IP
+Because the overlay is sourced as root, it must come from a trusted location.
+After resolving symlinks, the file must be a regular file owned by root and
+not group- or world-writable, and every directory on its path must also be
+owned by root and not group- or world-writable.
+Sticky directories such as
+.I /tmp
+do not qualify.
+Anything else is a hard error.
+.I /etc/btrctl.d/
+is a suitable home for overlays.
+This check is what makes it safe to grant btrctl through a restricted
+.BR sudoers (5)
+rule that includes
+.BR SETENV .
+.TP
+.B NO_COLOR
+When set to any non-empty value, disables coloured output.
+Colour is in any case only used when the relevant stream is a terminal.
+.TP
+.B SUDO_USER
+Set by
+.BR sudo (8).
+When present, SSH connections for
+.B \-\-host
+are made as this user rather than as root, so the invoking user's keys and
+.BR ssh_config (5)
+are used.
+.
+.SH FILES
+.TP
+.I /etc/btrctl.conf
+Base configuration.
+.TP
+.I /etc/btrctl.d/
+Suggested location for
+.B BTRCTL_CONF
+overlays.
+.TP
+.IR BTRFS_MOUNT_POINT /@snapshots/ TIMESTAMP /
+A snapshot set.
+.TP
+.IR BTRFS_MOUNT_POINT /@snapshots/ TIMESTAMP /.btrctl/tags
+The set's tags, one per line.
+.TP
+.IR BTRFS_MOUNT_POINT /@snapshots/latest
+Symlink to the most recently created set.
+.TP
+.IR BTRFS_MOUNT_POINT /@snapshots/trunk_ ID
+Symlink to the set most recently backed up to trunk
+.IR ID .
+.TP
+.IR BTRFS_MOUNT_POINT /.btrctl/pre\-snapshot
+.TQ
+.IR BTRFS_MOUNT_POINT /.btrctl/post\-snapshot
+Snapshot hooks; see
+.BR HOOKS .
+.TP
+.IR TRUNK_MOUNT_POINT /.btrctl/trunk\-id
+Identifier of the trunk device.
+Create this file by hand when preparing a new trunk.
+.TP
+.IR TRUNK_MOUNT_POINT /@ HOST_LABEL /
+A host's backups on the trunk.
+Must contain an empty
+.B .btrctl
+marker file.
+.
+.SH EXIT STATUS
+0 on success, 1 on any error or when the user declines a confirmation.
+Commands run with
+.B \-\-host
+exit with the remote command's status.
+.
+.SH EXAMPLES
+Take a tagged snapshot set and list the result:
+.PP
+.RS
+.nf
+$ btrctl snapshot \-\-tag pre\-upgrade
+$ btrctl list
+.fi
+.RE
+.PP
+Preview what pruning would remove, then do it:
+.PP
+.RS
+.nf
+$ btrctl prune \-\-dry\-run
+$ btrctl prune
+.fi
+.RE
+.PP
+Back up the latest set from a remote machine to the attached trunk, then
+check what the trunk holds:
+.PP
+.RS
+.nf
+$ btrctl trunk backup \-\-host db01
+$ btrctl trunk list db01
+.fi
+.RE
+.PP
+Keep a set indefinitely:
+.PP
+.RS
+.nf
+$ btrctl tag 2026\-10\-07\-120000 add noprune
+.fi
+.RE
+.PP
+Use the latest set's name in a script:
+.PP
+.RS
+.nf
+set=$(btrctl latest)
+.fi
+.RE
+.
+.SH SEE ALSO
+.BR btrfs (8),
+.BR btrfs\-subvolume (8),
+.BR btrfs\-send (8),
+.BR btrfs\-receive (8),
+.BR ssh (1),
+.BR sudo (8)

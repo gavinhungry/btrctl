@@ -1364,6 +1364,8 @@ ${c_bold}COMMANDS:${c_reset}
   ${c_bold}config${c_reset}
   ${c_bold}help${c_reset}, ${c_bold}-h${c_reset}, ${c_bold}--help${c_reset}
 
+See ${c_bold}btrctl${c_reset}(1) for full documentation.
+
 EOF
 }
 
