@@ -491,6 +491,18 @@ _table_row() {
   printf '%s%s%s\n' "$style" "$line" "${style:+$OUT_RESET}"
 }
 
+# Append one row to the prune table being built by _run_prune. Relies on
+# bash's dynamic scoping to reach the caller's row_* arrays and *_width locals.
+_prune_row() {
+  local action="$1" host="$2" set_name="$3" reason="$4"
+  row_actions+=("$action")
+  row_hosts+=("$host")
+  row_sets+=("$set_name")
+  row_reasons+=("$reason")
+  [ "${#host}" -le "$host_width" ] || host_width=${#host}
+  [ "${#set_name}" -le "$set_width" ] || set_width=${#set_name}
+}
+
 _run_prune() {
   local dry_run="$1" local_sets="$2"; shift 2
   local now month_cutoff dir label index reason protection
@@ -498,17 +510,10 @@ _run_prune() {
   month_cutoff=$(_prune_month_cutoff "$now") || return 1
   local -a names=() reasons=() delete_paths=()
   local retained=0 deleted=0 skipped=0 total=0
+  # Rows are collected first so column widths can be sized to the content;
+  # _prune_row appends to these via dynamic scoping.
   local -a row_actions=() row_hosts=() row_sets=() row_reasons=()
   local host_width=4 set_width=3
-  # Collect rows first so column widths can be sized to the content.
-  _prune_row() {
-    row_actions+=("$1")
-    row_hosts+=("$2")
-    row_sets+=("$3")
-    row_reasons+=("$4")
-    [ "${#2}" -le "$host_width" ] || host_width=${#2}
-    [ "${#3}" -le "$set_width" ] || set_width=${#3}
-  }
   for dir in "$@"; do
     label="$HOST_LABEL"
     [ "$local_sets" -eq 1 ] || { label="${dir##*/}"; label="trunk/${label#@}"; }
