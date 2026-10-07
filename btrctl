@@ -380,7 +380,7 @@ _run_prune() {
   _prune_row() {
     local action="$1" color=""; shift
     [ "$header_shown" -eq 1 ] || {
-      printf '%s%-6s  %-20s  %-20s  %s%s\n' "$OUT_BOLD" ACTION HOST SET REASON "$OUT_RESET"
+      printf '%s%-20s  %-20s  %-6s  %s%s\n' "$OUT_BOLD" HOST SET ACTION REASON "$OUT_RESET"
       header_shown=1
     }
     if [ -n "$previous_label" ] && [ "$1" != "$previous_label" ]; then
@@ -391,7 +391,7 @@ _run_prune() {
       KEEP) color="$OUT_GREEN" ;;
       DELETE) color="$OUT_RED" ;;
     esac
-    printf '%s%-6s%s  %-20s  %-20s  %s\n' "$color" "$action" "$OUT_RESET" "$@"
+    printf '%-20s  %-20s  %s%-6s%s  %s\n' "$1" "$2" "$color" "$action" "$OUT_RESET" "$3"
   }
   for dir in "$@"; do
     label="$HOST_LABEL"
