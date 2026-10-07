@@ -16,8 +16,17 @@ ENVIRONMENT:
       /etc/btrctl.conf. Useful for a second, independent btrfs pool on the same
       host (its own HOST_LABEL/BTRFS_MOUNT_POINT/ SUBVOLUMES) while still
       sharing TRUNK_* settings from the base config. If set and FILE does not
-       exist, this is a hard error. Preserved automatically across the automatic
-       sudo elevation that happens when btrctl isn't already running as root.
+      exist, this is a hard error. Preserved automatically across the automatic
+      sudo elevation that happens when btrctl isn't already running as root.
+
+      Because FILE is sourced as root after that elevation, it must come from a
+      trusted location: after resolving symlinks, FILE must be a regular file
+      owned by root and not group- or world-writable, and every directory on
+      its path must be owned by root and not group- or world-writable (sticky
+      directories such as /tmp do not qualify). Anything else is a hard error.
+      /etc/btrctl.d/ is a good home for overlays. This is what makes it safe to
+      grant btrctl through a restricted sudoers rule with SETENV; without the
+      check, BTRCTL_CONF would be equivalent to arbitrary root.
 
 CONFIGURATION:
   /etc/btrctl.conf sets HOST_LABEL, BTRFS_MOUNT_POINT, SUBVOLUMES and

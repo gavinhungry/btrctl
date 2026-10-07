@@ -76,9 +76,34 @@ _info() {
   _log "$ERR_BLUE" INFO "$@"
 }
 
+# A file that will be sourced as root must not be modifiable by anyone else.
+# Resolve symlinks, then require the file and every directory above it to be
+# owned by root and not group/world writable. Prints the resolved path.
+_require_trusted_file() {
+  local path="$1" description="$2" resolved component uid mode
+  resolved=$(readlink -f -- "$path") && [ -n "$resolved" ] || \
+    _die "${description} ${path} cannot be resolved"
+  [ -f "$resolved" ] || _die "${description} ${path} is not a regular file"
+
+  component="$resolved"
+  while :; do
+    read -r uid mode < <(stat -c '%u %a' -- "$component") || \
+      _die "${description} ${path} is not trusted: cannot stat ${component}"
+    [ "$uid" = 0 ] || \
+      _die "${description} ${path} is not trusted: ${component} is owned by uid ${uid} (must be root)"
+    [ $(( 8#$mode & 8#022 )) -eq 0 ] || \
+      _die "${description} ${path} is not trusted: ${component} is group/world writable (mode ${mode})"
+    [ "$component" != / ] || break
+    component="${component%/*}"
+    component="${component:-/}"
+  done
+  printf '%s\n' "$resolved"
+}
+
 CONF_OVERLAY_FILE="${BTRCTL_CONF:-}"
 if [ -n "$CONF_OVERLAY_FILE" ]; then
   [ -f "$CONF_OVERLAY_FILE" ] || _die "config overlay file not found: ${CONF_OVERLAY_FILE}"
+  CONF_OVERLAY_FILE=$(_require_trusted_file "$CONF_OVERLAY_FILE" "config overlay")
   source "$CONF_OVERLAY_FILE"
 fi
 
