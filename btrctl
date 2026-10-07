@@ -93,21 +93,24 @@ _info() {
 
 # A file that will be sourced as root must not be modifiable by anyone else.
 # Resolve symlinks, then require the file and every directory above it to be
-# owned by root and not group/world writable. Prints the resolved path.
+# owned by root, not world writable, and group writable only when the group
+# is root (gid 0). Prints the resolved path.
 _require_trusted_file() {
-  local path="$1" description="$2" resolved component uid mode
+  local path="$1" description="$2" resolved component uid gid mode
   resolved=$(readlink -f -- "$path") && [ -n "$resolved" ] || \
     _die "${description} ${path} cannot be resolved"
   [ -f "$resolved" ] || _die "${description} ${path} is not a regular file"
 
   component="$resolved"
   while :; do
-    read -r uid mode < <(stat -c '%u %a' -- "$component") || \
+    read -r uid gid mode < <(stat -c '%u %g %a' -- "$component") || \
       _die "${description} ${path} is not trusted: cannot stat ${component}"
     [ "$uid" = 0 ] || \
       _die "${description} ${path} is not trusted: ${component} is owned by uid ${uid} (must be root)"
-    [ $(( 8#$mode & 8#022 )) -eq 0 ] || \
-      _die "${description} ${path} is not trusted: ${component} is group/world writable (mode ${mode})"
+    [ $(( 8#$mode & 8#002 )) -eq 0 ] || \
+      _die "${description} ${path} is not trusted: ${component} is world writable (mode ${mode})"
+    [ $(( 8#$mode & 8#020 )) -eq 0 ] || [ "$gid" = 0 ] || \
+      _die "${description} ${path} is not trusted: ${component} is writable by group ${gid}, which is not root (mode ${mode})"
     [ "$component" != / ] || break
     component="${component%/*}"
     component="${component:-/}"

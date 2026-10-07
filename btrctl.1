@@ -360,7 +360,7 @@ overlays (see
 .BR ENVIRONMENT ):
 after resolving symlinks, the hook and every directory above it, including
 .I BTRFS_MOUNT_POINT
-itself, must be owned by root and not group- or world-writable.
+itself, must be owned by root and writable by nobody but root.
 Both hooks are checked before anything is snapshotted; an untrusted hook is a
 hard error.
 A trusted file that is not executable is skipped with a warning.
@@ -526,9 +526,9 @@ The variable is carried across the automatic sudo re-execution.
 If it is set and the file does not exist, btrctl exits with an error.
 .IP
 Because the overlay is sourced as root, it must come from a trusted location.
-After resolving symlinks, the file must be a regular file owned by root and
-not group- or world-writable, and every directory on its path must also be
-owned by root and not group- or world-writable.
+After resolving symlinks, the file must be a regular file owned by root, and
+it and every directory on its path must be writable by nobody but root: not
+world-writable, and group-writable only when the group is root.
 Sticky directories such as
 .I /tmp
 do not qualify.
