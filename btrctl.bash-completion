@@ -1,16 +1,27 @@
-__btrctl_trunk_hosts() {
+# Run a btrctl subcommand that needs root, without ever prompting: btrctl
+# would otherwise exec an interactive sudo from inside tab completion. With no
+# cached sudo ticket this fails silently and callers get no candidates.
+__btrctl_run_root() {
   local btrctl_path
 
   btrctl_path=$(type -P btrctl || true)
   [ -n "$btrctl_path" ] || return
 
   if [ "$(id -u)" -eq 0 ]; then
-    command "$btrctl_path" trunk hosts 2>/dev/null || true
+    command "$btrctl_path" "$@" 2>/dev/null || true
   elif [ -n "${BTRCTL_CONF:-}" ]; then
-    command sudo -n BTRCTL_CONF="$BTRCTL_CONF" -- "$btrctl_path" trunk hosts 2>/dev/null || true
+    command sudo -n BTRCTL_CONF="$BTRCTL_CONF" -- "$btrctl_path" "$@" 2>/dev/null || true
   else
-    command sudo -n -- "$btrctl_path" trunk hosts 2>/dev/null || true
+    command sudo -n -- "$btrctl_path" "$@" 2>/dev/null || true
   fi
+}
+
+__btrctl_trunk_hosts() {
+  __btrctl_run_root trunk hosts
+}
+
+__btrctl_local_sets() {
+  __btrctl_run_root list | awk 'NR > 1 { print $2 }'
 }
 
 __btrctl() {
@@ -152,11 +163,14 @@ __btrctl() {
       [ "$positional_count" -le 1 ] || return
       [ "$host_seen" -eq 0 ] && options="--host"
       if [ "$host_seen" -eq 0 ] && [ "$positional_count" -eq 0 ]; then
-        set_candidates=$(command btrctl list 2>/dev/null | awk 'NR > 1 { print $2 }')
+        set_candidates=$(__btrctl_local_sets)
       fi
       ;;
     tag)
       [ "$host_seen" -eq 0 ] && options="--host"
+      if [ "$host_seen" -eq 0 ] && [ "$positional_count" -eq 0 ]; then
+        set_candidates=$(__btrctl_local_sets)
+      fi
       [ "$positional_count" -ne 1 ] || set_candidates="add rm"
       ;;
     trunk-tag)
@@ -166,7 +180,7 @@ __btrctl() {
       [ "$positional_count" -le 1 ] || return
       [ "$host_seen" -eq 0 ] && options="--host"
       if [ "$host_seen" -eq 0 ] && [ "$positional_count" -eq 0 ]; then
-        set_candidates=$(command btrctl list 2>/dev/null | awk 'NR > 1 { print $2 }')
+        set_candidates=$(__btrctl_local_sets)
       fi
       ;;
   esac
