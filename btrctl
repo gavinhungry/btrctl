@@ -23,6 +23,9 @@ OUT_RESET=''
 OUT_BOLD=''
 OUT_RED=''
 OUT_GREEN=''
+OUT_YELLOW=''
+OUT_MAGENTA=''
+OUT_CYAN=''
 ERR_RESET=''
 ERR_RED=''
 ERR_YELLOW=''
@@ -35,6 +38,9 @@ if [ -z "${NO_COLOR:-}" ]; then
     OUT_BOLD=$'\033[1m'
     OUT_RED=$'\033[1;31m'
     OUT_GREEN=$'\033[1;32m'
+    OUT_YELLOW=$'\033[1;33m'
+    OUT_MAGENTA=$'\033[1;35m'
+    OUT_CYAN=$'\033[1;36m'
   fi
 
   if [ -t 2 ]; then
@@ -414,10 +420,25 @@ _run_prune() {
     done
   done
   if [ "${#row_actions[@]}" -gt 0 ]; then
-    local i color previous_host=""
+    local i color previous_host="" rest token token_color reason_display
     _table_row "$OUT_BOLD" '%-*s    %-*s    %-6s    %s' \
       "$host_width" HOST "$set_width" SET ACTION REASON
     for i in "${!row_actions[@]}"; do
+      # Highlight protections and anomalies; time-based tiers stay plain.
+      reason_display=""
+      rest="${row_reasons[i]}"
+      while [ -n "$rest" ]; do
+        token="${rest%%, *}"
+        if [ "$token" = "$rest" ]; then rest=""; else rest="${rest#*, }"; fi
+        case "$token" in
+          latest|trunk_*) token_color="$OUT_CYAN" ;;
+          noprune) token_color="$OUT_MAGENTA" ;;
+          future) token_color="$OUT_YELLOW" ;;
+          *) token_color="" ;;
+        esac
+        [ -z "$token_color" ] || token="${token_color}${token}${OUT_RESET}"
+        reason_display+="${reason_display:+, }${token}"
+      done
       if [ -n "$previous_host" ] && [ "${row_hosts[i]}" != "$previous_host" ]; then
         printf '\n'
       fi
@@ -429,7 +450,7 @@ _run_prune() {
       esac
       _table_row '' '%-*s    %-*s    %s%-6s%s    %s' \
         "$host_width" "${row_hosts[i]}" "$set_width" "${row_sets[i]}" \
-        "$color" "${row_actions[i]}" "$OUT_RESET" "${row_reasons[i]}"
+        "$color" "${row_actions[i]}" "$OUT_RESET" "$reason_display"
     done
   fi
   _info "Snapshot sets: ${total}; keep: ${retained}; prune: ${#delete_paths[@]}"
