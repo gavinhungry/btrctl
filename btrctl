@@ -140,11 +140,21 @@ _ensure_btrfs_mounted() {
   mountpoint -q "$BTRFS_MOUNT_POINT" || _die "${BTRFS_MOUNT_POINT} is not mounted"
 }
 
+# Print the resolved path of a snapshot hook, or nothing if it is absent.
+# Hooks run as root, so they must meet the same trust rules as config files;
+# an untrusted hook is fatal. Resolve both hooks before snapshotting so a bad
+# post-snapshot hook cannot leave a half-finished set behind.
+_snapshot_hook_path() {
+  local hook="$1" script
+  script="${BTRFS_MOUNT_POINT}/.btrctl/${hook}"
+  [ -e "$script" ] || [ -L "$script" ] || return 0
+  _require_trusted_file "$script" "${hook} hook"
+}
+
 _run_snapshot_hook() {
-  local hook="$1"
-  local snapshot_dir="${2:-}"
-  local script="${BTRFS_MOUNT_POINT}/.btrctl/${hook}"
-  [ -e "$script" ] || return 0
+  local hook="$1" script="$2"
+  local snapshot_dir="${3:-}"
+  [ -n "$script" ] || return 0
 
   if [ ! -x "$script" ]; then
     _warn "${script} exists but is not executable"
@@ -691,7 +701,10 @@ cmd_snapshot() {
   _maybe_dispatch_remote "$host" snapshot "${remote_args[@]}"
   _ensure_btrfs_mounted
   _validate_source_config config "$HOST_LABEL" "$BTRFS_MOUNT_POINT" "${SUBVOLUMES[@]}"
-  _run_snapshot_hook pre-snapshot || \
+  local pre_hook post_hook
+  pre_hook=$(_snapshot_hook_path pre-snapshot) || exit 1
+  post_hook=$(_snapshot_hook_path post-snapshot) || exit 1
+  _run_snapshot_hook pre-snapshot "$pre_hook" || \
     _die "pre-snapshot hook failed; aborting snapshot"
 
   local snapshots_subvol="@snapshots"
@@ -718,7 +731,7 @@ cmd_snapshot() {
   _write_tags "$snapshot_dir" "${snapshot_tags[@]}"
   _info "Setting latest -> ${now}"
   _update_symlink "$now" "${BTRFS_MOUNT_POINT}/${snapshots_subvol}/latest" || true
-  _run_snapshot_hook post-snapshot "$snapshot_dir" || \
+  _run_snapshot_hook post-snapshot "$post_hook" "$snapshot_dir" || \
     _die "post-snapshot hook failed"
   local tag_display
   tag_display=$(_display_tags "$snapshot_dir")

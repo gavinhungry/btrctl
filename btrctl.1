@@ -329,7 +329,16 @@ are run by
 Both run as root with
 .I BTRFS_MOUNT_POINT
 as their working directory and in their environment.
-A file that exists but is not executable is skipped with a warning.
+Because they run as root, hooks must meet the same trust requirements as
+.B BTRCTL_CONF
+overlays (see
+.BR ENVIRONMENT ):
+after resolving symlinks, the hook and every directory above it, including
+.I BTRFS_MOUNT_POINT
+itself, must be owned by root and not group- or world-writable.
+Both hooks are checked before anything is snapshotted; an untrusted hook is a
+hard error.
+A trusted file that is not executable is skipped with a warning.
 .TP
 .B pre\-snapshot
 Runs before any subvolume is snapshotted.
