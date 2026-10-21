@@ -96,9 +96,10 @@ _info() {
 # A file that will be sourced as root must not be modifiable by anyone else.
 # Resolve symlinks, then require the file and every directory above it to be
 # owned by root, not world writable, and group writable only when the group
-# is root (gid 0). Prints the resolved path.
+# is root (gid 0) or wheel (looked up by name). Prints the resolved path.
 _require_trusted_file() {
-  local path="$1" description="$2" resolved component uid gid mode
+  local path="$1" description="$2" resolved component uid gid mode wheel_gid
+  wheel_gid=$(getent group wheel | cut -d: -f3)
   resolved=$(readlink -f -- "$path") && [ -n "$resolved" ] || \
     _die "${description} ${path} cannot be resolved"
   [ -f "$resolved" ] || _die "${description} ${path} is not a regular file"
@@ -112,7 +113,8 @@ _require_trusted_file() {
     [ $(( 8#$mode & 8#002 )) -eq 0 ] || \
       _die "${description} ${path} is not trusted: ${component} is world writable (mode ${mode})"
     [ $(( 8#$mode & 8#020 )) -eq 0 ] || [ "$gid" = 0 ] || \
-      _die "${description} ${path} is not trusted: ${component} is writable by group ${gid}, which is not root (mode ${mode})"
+      { [ -n "$wheel_gid" ] && [ "$gid" = "$wheel_gid" ]; } || \
+      _die "${description} ${path} is not trusted: ${component} is writable by group ${gid}, which is not root or wheel (mode ${mode})"
     [ "$component" != / ] || break
     component="${component%/*}"
     component="${component:-/}"

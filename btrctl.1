@@ -528,13 +528,15 @@ If it is set and the file does not exist, btrctl exits with an error.
 Because the overlay is sourced as root, it must come from a trusted location.
 After resolving symlinks, the file must be a regular file owned by root, and
 it and every directory on its path must be writable by nobody but root: not
-world-writable, and group-writable only when the group is root.
+world-writable, and group-writable only when the group is root or wheel.
 Sticky directories such as
 .I /tmp
 do not qualify.
 Anything else is a hard error.
 .I /etc/btrctl.d/
 is a suitable home for overlays.
+Members of the wheel group can therefore run code as root through
+.BR BTRCTL_CONF .
 This check is what makes it safe to grant btrctl through a restricted
 .BR sudoers (5)
 rule that includes
